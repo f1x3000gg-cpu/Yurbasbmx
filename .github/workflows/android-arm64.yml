@@ -9,6 +9,13 @@ on:
       - 'Packages/**'
       - 'ProjectSettings/**'
       - '.github/workflows/android-arm64.yml'
+  pull_request:
+    branches: [CODEX]
+    paths:
+      - 'Assets/**'
+      - 'Packages/**'
+      - 'ProjectSettings/**'
+      - '.github/workflows/android-arm64.yml'
 
 jobs:
   build:
