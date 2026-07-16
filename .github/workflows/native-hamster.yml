@@ -41,7 +41,21 @@ jobs:
 
       - name: Build debug APK
         working-directory: HamsterNative
-        run: gradle :app:assembleDebug --stacktrace --no-daemon
+        shell: bash
+        run: |
+          set +e
+          gradle :app:assembleDebug --stacktrace --no-daemon > build.log 2>&1
+          code=$?
+          tail -n 160 build.log
+          exit $code
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HamsterFlip-Build-Log
+          path: HamsterNative/build.log
+          if-no-files-found: warn
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
