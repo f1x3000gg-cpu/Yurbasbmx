@@ -39,7 +39,7 @@ namespace HamsterFlip.Editor
         {
             PlayerSettings.companyName = "Independent Test";
             PlayerSettings.productName = "Hamster Flip Test";
-            PlayerSettings.applicationIdentifier = "com.independent.hamsterfliptest";
+            PlayerSettings.applicationIdentifier = "com.f1x3000gg.hamsterflip";
             PlayerSettings.bundleVersion = "0.1.0";
             PlayerSettings.Android.bundleVersionCode = 1;
             PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
