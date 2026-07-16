@@ -27,6 +27,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check Unity license credentials
+        shell: bash
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          if [ -z "$UNITY_LICENSE" ] && [ -z "$UNITY_SERIAL" ]; then
+            echo "::error::No UNITY_LICENSE or UNITY_SERIAL secret exists in this repository. Unity cannot legally start IL2CPP compilation without activation."
+            exit 12
+          fi
+          if [ -n "$UNITY_SERIAL" ] && { [ -z "$UNITY_EMAIL" ] || [ -z "$UNITY_PASSWORD" ]; }; then
+            echo "::error::UNITY_SERIAL exists, but UNITY_EMAIL or UNITY_PASSWORD is missing."
+            exit 13
+          fi
+          echo "Unity activation credentials are present."
+
       - name: Build Unity Android ARM64
         uses: game-ci/unity-builder@v4
         env:
