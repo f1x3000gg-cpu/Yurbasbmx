@@ -1,0 +1,41 @@
+name: Build Hamster Flip ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [CODEX]
+    paths:
+      - 'Assets/**'
+      - 'Packages/**'
+      - 'ProjectSettings/**'
+      - '.github/workflows/android-arm64.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Unity Android ARM64
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+        with:
+          unityVersion: 2022.3.62f2
+          targetPlatform: Android
+          buildMethod: HamsterFlip.Editor.AndroidBuilder.BuildArm64FromCommandLine
+          androidExportType: androidPackage
+          customParameters: -nographics
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: HamsterFlip-ARM64-APK
+          path: Build/Android/HamsterFlip_ARM64.apk
+          if-no-files-found: error
