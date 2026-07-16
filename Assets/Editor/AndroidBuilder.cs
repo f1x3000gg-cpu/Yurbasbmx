@@ -27,12 +27,16 @@ namespace HamsterFlip.Editor
             AssetDatabase.Refresh();
         }
 
-        public static void BuildArm64FromCommandLine()
+        // Unity Build Automation calls this from Advanced Settings > Pre-export method.
+        public static void PreExport()
         {
+            ConfigureAndroidPlayer();
             GenerateScene();
-            if (!EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android))
-                throw new Exception("Android Build Support is missing.");
+            Debug.Log("Hamster Flip: Unity Build Automation pre-export setup completed.");
+        }
 
+        private static void ConfigureAndroidPlayer()
+        {
             PlayerSettings.companyName = "Independent Test";
             PlayerSettings.productName = "Hamster Flip Test";
             PlayerSettings.applicationIdentifier = "com.independent.hamsterfliptest";
@@ -53,6 +57,15 @@ namespace HamsterFlip.Editor
             PlayerSettings.SetGraphicsAPIs(BuildTarget.Android, new[] { GraphicsDeviceType.OpenGLES3 });
             EditorUserBuildSettings.androidBuildSystem = AndroidBuildSystem.Gradle;
             EditorUserBuildSettings.buildAppBundle = false;
+        }
+
+        public static void BuildArm64FromCommandLine()
+        {
+            if (!EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android))
+                throw new Exception("Android Build Support is missing.");
+
+            ConfigureAndroidPlayer();
+            GenerateScene();
 
             string directory = Path.GetFullPath("Build/Android");
             Directory.CreateDirectory(directory);
