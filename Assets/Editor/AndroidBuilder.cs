@@ -12,36 +12,36 @@ namespace HamsterFlip.Editor
 {
     public static class AndroidBuilder
     {
-        private const string ScenePath = "Assets/Generated/HamsterFlip.unity";
+        private const string ScenePath = "Assets/Generated/HamsterTale.unity";
 
-        [MenuItem("Hamster Flip/Generate Scene")]
+        [MenuItem("Hamster Tale/Generate Scene")]
         public static void GenerateScene()
         {
             Directory.CreateDirectory("Assets/Generated");
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-            var bootstrap = new GameObject("Hamster Flip Bootstrap");
-            bootstrap.AddComponent<HamsterFlip.HamsterBootstrap>();
+            GameObject bootstrap = new GameObject("Hamster Tale Bootstrap");
+            bootstrap.AddComponent<HamsterFlip.HamsterTaleBootstrap>();
             EditorSceneManager.SaveScene(scene, ScenePath);
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
         }
 
-        // Unity Build Automation calls this from Advanced Settings > Pre-export method.
+        // Keep this exact public method name because Unity Build Automation already calls it.
         public static void PreExport()
         {
             ConfigureAndroidPlayer();
             GenerateScene();
-            Debug.Log("Hamster Flip: Unity Build Automation pre-export setup completed.");
+            Debug.Log("Hamster Tale: Unity Build Automation pre-export setup completed.");
         }
 
         private static void ConfigureAndroidPlayer()
         {
-            PlayerSettings.companyName = "Independent Test";
-            PlayerSettings.productName = "Hamster Flip Test";
+            PlayerSettings.companyName = "DippiX Games";
+            PlayerSettings.productName = "Hamster Tale - Last Seed";
             PlayerSettings.applicationIdentifier = "com.f1x3000gg.hamsterflip";
-            PlayerSettings.bundleVersion = "0.1.0";
-            PlayerSettings.Android.bundleVersionCode = 1;
+            PlayerSettings.bundleVersion = "1.0.0";
+            PlayerSettings.Android.bundleVersionCode = 2;
             PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
             PlayerSettings.allowedAutorotateToPortrait = false;
             PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
@@ -69,8 +69,8 @@ namespace HamsterFlip.Editor
 
             string directory = Path.GetFullPath("Build/Android");
             Directory.CreateDirectory(directory);
-            string output = Path.Combine(directory, "HamsterFlip_ARM64.apk");
-            var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
+            string output = Path.Combine(directory, "HamsterTale_LastSeed_ARM64.apk");
+            BuildReport report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
             {
                 scenes = new[] { ScenePath },
                 locationPathName = output,
@@ -78,8 +78,10 @@ namespace HamsterFlip.Editor
                 targetGroup = BuildTargetGroup.Android,
                 options = BuildOptions.None
             });
+
             if (report.summary.result != BuildResult.Succeeded)
                 throw new Exception("Build failed: " + report.summary.result + ", errors=" + report.summary.totalErrors);
+
             Debug.Log("APK built: " + output);
         }
     }
