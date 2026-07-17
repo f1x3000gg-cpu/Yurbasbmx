@@ -14,7 +14,21 @@ namespace HamsterFlip
             QualitySettings.vSyncCount = 0;
             Time.fixedDeltaTime = 0.02f;
             Screen.orientation = ScreenOrientation.LandscapeLeft;
-            font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+
+            // Arial.ttf can throw on recent Unity versions before the camera/world
+            // are created, leaving only a blank gray screen. LegacyRuntime.ttf is
+            // the supported built-in runtime font. The game still starts if the
+            // font cannot be loaded for any reason.
+            try
+            {
+                font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            }
+            catch (System.Exception exception)
+            {
+                Debug.LogWarning("Built-in font could not be loaded: " + exception.Message);
+                font = null;
+            }
+
             BuildLight();
             BuildGame();
         }
@@ -148,7 +162,9 @@ namespace HamsterFlip
         Text Text(Transform p,string value,int size,TextAnchor align)
         {
             GameObject o=new GameObject("Text",typeof(RectTransform),typeof(Text)); o.transform.SetParent(p,false);
-            Text t=o.GetComponent<Text>(); t.font=font; t.text=value; t.fontSize=size; t.alignment=align; t.color=Color.white;
+            Text t=o.GetComponent<Text>();
+            if(font!=null)t.font=font;
+            t.text=value; t.fontSize=size; t.alignment=align; t.color=Color.white;
             t.horizontalOverflow=HorizontalWrapMode.Overflow; t.verticalOverflow=VerticalWrapMode.Overflow; return t;
         }
 
