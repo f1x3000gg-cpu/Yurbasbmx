@@ -1,0 +1,69 @@
+name: Render Kris exact SGM theme
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/render-kris-exact.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install audio tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fluidsynth libfluidsynth-dev ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install numpy mido pyfluidsynth
+
+      - name: Download exact SGM V2.01 parts
+        run: |
+          set -euxo pipefail
+          mkdir -p soundfonts/part1 soundfonts/part2 soundfonts/part3
+          base='https://github.com/open-soundfonts/SGM_V2_01_soundfonts/raw/refs/heads/master'
+          curl -fL --retry 5 --retry-delay 3 "$base/SGM_V2_01_part1.sf2.tar.gz" -o part1.tar.gz
+          curl -fL --retry 5 --retry-delay 3 "$base/SGM_V2_01_part2.sf2.tar.gz" -o part2.tar.gz
+          curl -fL --retry 5 --retry-delay 3 "$base/SGM_V2_01_part3.sf2.tar.gz" -o part3.tar.gz
+          tar -xzf part1.tar.gz -C soundfonts/part1
+          tar -xzf part2.tar.gz -C soundfonts/part2
+          tar -xzf part3.tar.gz -C soundfonts/part3
+          find soundfonts -type f -name '*.sf2' -print
+
+      - name: Restore renderer
+        shell: bash
+        run: |
+          cat > renderer.py.gz.b64 <<'B64'
+          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
+          B64
+          sed -i 's/^          //' renderer.py.gz.b64
+          base64 -d renderer.py.gz.b64 | gzip -d > renderer.py
+          python -m py_compile renderer.py
+
+      - name: Render exact-instrument track
+        shell: bash
+        run: |
+          set -euxo pipefail
+          part1="$(find soundfonts/part1 -type f -name '*.sf2' | head -n1)"
+          part2="$(find soundfonts/part2 -type f -name '*.sf2' | head -n1)"
+          part3="$(find soundfonts/part3 -type f -name '*.sf2' | head -n1)"
+          test -n "$part1" && test -n "$part2" && test -n "$part3"
+          python renderer.py --part1 "$part1" --part2 "$part2" --part3 "$part3" --out Build/KrisExact
+
+      - name: Upload rendered theme
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kris-Signal-Beneath-The-Noise
+          path: Build/KrisExact/*
+          if-no-files-found: error
+          retention-days: 7
