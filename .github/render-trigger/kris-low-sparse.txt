@@ -1,0 +1,1 @@
+Render the low-register sparse Kris theme.
