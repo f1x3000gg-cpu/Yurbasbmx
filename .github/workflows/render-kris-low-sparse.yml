@@ -1,0 +1,57 @@
+name: Render Kris low sparse SGM theme
+
+on:
+  pull_request:
+    paths:
+      - '.github/render-trigger/kris-low-sparse.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install audio tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fluidsynth libfluidsynth-dev ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install numpy mido pyfluidsynth
+      - name: Download exact SGM V2.01 parts
+        run: |
+          set -euxo pipefail
+          mkdir -p soundfonts/part1 soundfonts/part2 soundfonts/part3
+          base='https://github.com/open-soundfonts/SGM_V2_01_soundfonts/raw/refs/heads/master'
+          curl -fL --retry 5 "$base/SGM_V2_01_part1.sf2.tar.gz" -o p1.tar.gz
+          curl -fL --retry 5 "$base/SGM_V2_01_part2.sf2.tar.gz" -o p2.tar.gz
+          curl -fL --retry 5 "$base/SGM_V2_01_part3.sf2.tar.gz" -o p3.tar.gz
+          tar -xzf p1.tar.gz -C soundfonts/part1
+          tar -xzf p2.tar.gz -C soundfonts/part2
+          tar -xzf p3.tar.gz -C soundfonts/part3
+      - name: Restore renderer
+        run: |
+          cat > renderer.py.gz.b64 <<'B64'
+          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
+          B64
+          sed -i 's/^          //' renderer.py.gz.b64
+          base64 -d renderer.py.gz.b64 | gzip -d > renderer.py
+          python -m py_compile renderer.py
+      - name: Render exact SGM draft
+        run: |
+          part1="$(find soundfonts/part1 -type f -name '*.sf2' | head -n1)"
+          part2="$(find soundfonts/part2 -type f -name '*.sf2' | head -n1)"
+          part3="$(find soundfonts/part3 -type f -name '*.sf2' | head -n1)"
+          python renderer.py --part1 "$part1" --part2 "$part2" --part3 "$part3" --out Build/KrisLowSparse
+      - name: Upload draft
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kris-The-Room-Remembers
+          path: Build/KrisLowSparse/*
+          if-no-files-found: error
+          retention-days: 7
