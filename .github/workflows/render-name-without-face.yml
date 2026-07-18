@@ -1,0 +1,55 @@
+name: Render Kris A Name Without A Face
+
+on:
+  pull_request:
+    paths:
+      - '.github/render-trigger/name-without-face.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install audio tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fluidsynth libfluidsynth-dev ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install numpy mido pyfluidsynth
+
+      - name: Download exact SGM V2.01 parts
+        run: |
+          set -euxo pipefail
+          mkdir -p soundfonts/part1 soundfonts/part2 soundfonts/part3
+          base='https://github.com/open-soundfonts/SGM_V2_01_soundfonts/raw/refs/heads/master'
+          curl -fL --retry 5 --retry-delay 3 "$base/SGM_V2_01_part1.sf2.tar.gz" -o part1.tar.gz
+          curl -fL --retry 5 --retry-delay 3 "$base/SGM_V2_01_part2.sf2.tar.gz" -o part2.tar.gz
+          curl -fL --retry 5 --retry-delay 3 "$base/SGM_V2_01_part3.sf2.tar.gz" -o part3.tar.gz
+          tar -xzf part1.tar.gz -C soundfonts/part1
+          tar -xzf part2.tar.gz -C soundfonts/part2
+          tar -xzf part3.tar.gz -C soundfonts/part3
+
+      - name: Render track
+        run: |
+          set -euxo pipefail
+          part1="$(find soundfonts/part1 -type f -name '*.sf2' | head -n1)"
+          part2="$(find soundfonts/part2 -type f -name '*.sf2' | head -n1)"
+          part3="$(find soundfonts/part3 -type f -name '*.sf2' | head -n1)"
+          python Tools/render_name_without_face.py --part1 "$part1" --part2 "$part2" --part3 "$part3" --out Build/NameWithoutFace
+
+      - name: Upload track
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kris-A-Name-Without-A-Face
+          path: Build/NameWithoutFace/*
+          if-no-files-found: error
+          retention-days: 7
