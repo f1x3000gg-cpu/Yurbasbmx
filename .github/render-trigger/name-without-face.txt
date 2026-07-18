@@ -1,0 +1,1 @@
+Render the hand-written Kris theme with exact SGM V2.01 instruments.
