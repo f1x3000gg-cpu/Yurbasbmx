@@ -61,8 +61,8 @@ def pattern(events: Dict[str, List[Event]], track: str, start: float,
         if note is not None:
             add(events, track, cursor, note, max(.04, duration * gate), velocity)
         cursor += duration
-    if abs(cursor - 4.0) > .001:
-        raise ValueError(f"Pattern length must be 4 beats, got {cursor}")
+    if abs((cursor - start) - 4.0) > .001:
+        raise ValueError(f"Pattern length must be 4 beats, got {cursor - start}")
 
 
 def chord(events: Dict[str, List[Event]], track: str, start: float,
