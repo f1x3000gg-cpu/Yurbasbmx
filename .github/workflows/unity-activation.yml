@@ -1,0 +1,27 @@
+name: Request Unity 2022.3 Activation File
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [CODEX]
+    paths:
+      - '.github/workflows/unity-activation.yml'
+      - 'Assets/UnityActivationTrigger.txt'
+
+jobs:
+  activation:
+    name: Generate Unity ALF
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request manual activation file
+        id: activation
+        uses: game-ci/unity-request-activation-file@v2
+        with:
+          unityVersion: 2022.3.62f2
+
+      - name: Upload activation file
+        uses: actions/upload-artifact@v4
+        with:
+          name: Unity-2022.3.62f2-Activation-File
+          path: ${{ steps.activation.outputs.filePath }}
+          if-no-files-found: error
