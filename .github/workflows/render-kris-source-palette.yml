@@ -1,0 +1,46 @@
+name: Render Kris with original Undertale source palette
+
+on:
+  pull_request:
+    paths:
+      - 'Tools/render_kris_source_palette.py'
+      - '.github/render-trigger/kris-source-palette-*'
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install audio tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fluidsynth libfluidsynth-dev ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install numpy mido pyfluidsynth
+      - name: Download original SGM V2.01 source bank
+        run: |
+          mkdir -p soundfonts
+          git clone --depth 1 https://github.com/open-soundfonts/SGM_V2_01_soundfonts.git soundfonts/sgm_repo
+          for archive in soundfonts/sgm_repo/SGM_V2_01_part*.sf2.tar.gz; do
+            tar -xzf "$archive" -C soundfonts
+          done
+          find soundfonts -name '*.sf2' -type f -print
+      - name: Render eight-bar source-palette proof
+        run: |
+          python Tools/render_kris_source_palette.py \
+            --sgm-dir soundfonts \
+            --out Build/KrisSourcePalette
+      - name: Upload rendered proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kris-Original-Undertale-Source-Palette
+          path: Build/KrisSourcePalette/*
+          if-no-files-found: error
+          retention-days: 7
