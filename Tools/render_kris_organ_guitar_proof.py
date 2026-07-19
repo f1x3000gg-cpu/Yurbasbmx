@@ -12,7 +12,7 @@ import numpy as np
 from mido import Message, MetaMessage, MidiFile, MidiTrack, bpm2tempo
 
 SR = 44100
-BPM = 148
+BPM = 150
 BEAT_SECONDS = 60.0 / BPM
 BARS = 8
 TAIL_SECONDS = 2.2
@@ -27,17 +27,12 @@ PITCH = {
 Event = Tuple[float, float, int, int]
 Pattern = Sequence[Tuple[str | int | None, float]]
 
+# Only the two requested headline lead timbres plus minimal rhythm support.
 PRESETS = {
-    "Megalo Over Guitar": (0, 0, "100 MEGALOVANIA - Overdriven Guitar"),
-    "Megalo Square25": (0, 8, "100 MEGALOVANIA - 25% Square"),
-    "Megalo Impact": (0, 9, "100 MEGALOVANIA - Impact Hit"),
-    "Megalo Background Guitar": (0, 13, "100 MEGALOVANIA - Background Guitar"),
-    "Megalo Bass": (0, 14, "100 MEGALOVANIA - Bass"),
-    "Hopes Piano1": (2, 126, "087 Hopes and Dreams - Piano 1"),
-    "Hopes POWER": (2, 127, "087 Hopes and Dreams - POWER DrumKit"),
-    "Hopes Pulse25": (3, 5, "087 Hopes and Dreams - Pulse 25%"),
-    "Hopes Duty": (3, 7, "087 Hopes and Dreams - Duty Cycle"),
-    "Hopes Lead Guitar": (3, 8, "087 Hopes and Dreams - Lead Guitar"),
+    "MEGALOVANIA Main Lead": (0, 0, "100 MEGALOVANIA - Overdriven Guitar"),
+    "Hopes Main Lead": (3, 8, "087 Hopes and Dreams - Lead Guitar"),
+    "MEGALOVANIA Bass": (0, 14, "100 MEGALOVANIA - Bass"),
+    "Hopes POWER Drums": (2, 127, "087 Hopes and Dreams - POWER DrumKit"),
 }
 
 
@@ -66,80 +61,62 @@ def add_pattern(events: Dict[str, List[Event]], track: str, start: float,
         cursor += duration
 
 
-def add_chord(events: Dict[str, List[Event]], track: str, start: float,
-              notes: Sequence[str], duration: float, velocity: int) -> None:
-    for note in notes:
-        add_note(events, track, start, note, duration, velocity)
-
-
 def build_events() -> Dict[str, List[Event]]:
     events = {name: [] for name in PRESETS}
 
+    # Completely new D-minor theme. Eight written bars, no random note generation.
     melody: List[Pattern] = [
-        [(None, .5), ("B4", .75), ("E5", .25), ("G5", 1.0), ("F#5", .5), ("E5", 1.0)],
-        [("D5", .75), ("B4", .25), ("A4", .5), ("B4", 1.0), (None, .5), ("E5", 1.0)],
-        [("G4", .5), ("B4", 1.0), ("D5", .5), ("E5", .75), ("D5", .25), ("B4", 1.0)],
-        [("A4", 1.0), ("C5", .5), ("B4", .5), ("G4", .75), ("F#4", .25), ("E4", 1.0)],
-        [("E5", .5), ("G5", .5), ("B5", 1.0), ("A5", .75), ("G5", .25), ("F#5", 1.0)],
-        [("D5", .5), ("F#5", .5), ("A5", 1.0), ("G5", .5), ("E5", .5), ("B4", 1.0)],
-        [("C5", .75), ("E5", .25), ("G5", .5), ("F#5", 1.0), ("D#5", .5), ("E5", 1.0)],
-        [("B4", .5), ("D5", .5), ("E5", 1.0), ("G5", .5), ("F#5", .5), ("E5", 1.0)],
+        [("D4", .5), (None, .25), ("F4", .25), ("G4", .5), ("A4", 1.0),
+         ("G4", .5), ("F4", .5), ("D4", .5)],
+        [("C4", .5), ("D4", .5), ("F4", 1.0), ("Eb4", .5),
+         ("D4", .5), ("C4", 1.0)],
+        [("Bb3", .5), ("D4", .5), ("F4", .75), ("G4", .25),
+         ("F4", .5), ("D4", .5), ("C4", 1.0)],
+        [("A3", .5), ("C#4", .5), ("E4", .5), ("G4", .5),
+         ("F4", .5), ("E4", .5), ("D4", 1.0)],
+        [("D4", .5), ("A4", .5), ("G4", .5), ("F4", .5),
+         ("D4", .5), ("F4", .5), ("A4", 1.0)],
+        [("Bb4", .5), ("A4", .5), ("G4", 1.0), ("F4", .5),
+         ("E4", .5), ("D4", 1.0)],
+        [("F4", .5), ("G4", .5), ("A4", 1.0), ("C5", .5),
+         ("Bb4", .5), ("A4", 1.0)],
+        [("G4", .5), ("F4", .5), ("E4", .5), ("C#4", .5),
+         ("D4", 2.0)],
     ]
 
-    chords = [
-        ["E3", "B3", "D4", "G4"],
-        ["C3", "G3", "B3", "E4"],
-        ["G2", "D3", "F#3", "B3"],
-        ["D3", "A3", "C4", "F#4"],
-        ["E3", "B3", "D4", "G4"],
-        ["B2", "F#3", "A3", "D4"],
-        ["C3", "G3", "B3", "E4"],
-        ["B2", "F#3", "A3", "D#4"],
-    ]
-    roots = ["E2", "C2", "G1", "D2", "E2", "B1", "C2", "B1"]
+    roots = ["D2", "Bb1", "F2", "A1", "D2", "Bb1", "G1", "A1"]
 
-    for bar in range(BARS):
+    for bar, phrase in enumerate(melody):
         start = bar * 4.0
-        add_pattern(events, "Hopes Piano1", start, melody[bar], 104)
-        add_pattern(events, "Hopes Lead Guitar", start, melody[bar], 72)
-        if bar in (0, 2, 4, 6):
-            add_pattern(events, "Hopes Pulse25", start, melody[bar], 24, transpose=-12)
-        else:
-            add_pattern(events, "Megalo Square25", start, melody[bar], 24, transpose=-12)
 
-        add_chord(events, "Hopes Piano1", start, chords[bar], .38, 42)
-        add_chord(events, "Hopes Piano1", start + 2.5, chords[bar], .34, 36)
+        # Bars 1-2: MEGALOVANIA lead alone.
+        # Bars 3-4: Hopes and Dreams lead alone.
+        # Bars 5-8: both headline leads together.
+        if bar < 2:
+            add_pattern(events, "MEGALOVANIA Main Lead", start, phrase, 118)
+        elif bar < 4:
+            add_pattern(events, "Hopes Main Lead", start, phrase, 116)
+        else:
+            add_pattern(events, "MEGALOVANIA Main Lead", start, phrase, 102)
+            add_pattern(events, "Hopes Main Lead", start, phrase, 94)
 
         root = note_number(roots[bar])
-        bass_pattern = [
-            (0.0, root), (1.0, root + 7), (1.5, root + 12),
-            (2.5, root + 7), (3.25, root + (10 if bar in (3, 7) else 12)),
-        ]
-        for pos, pitch in bass_pattern:
-            add_note(events, "Megalo Bass", start + pos, pitch, .48, 92 if pos == 0 else 72)
+        bass_notes = [root, root, root + 7, root, root + 12, root + 7, root, root + 7]
+        for step, pitch in enumerate(bass_notes):
+            add_note(events, "MEGALOVANIA Bass", start + step * .5, pitch, .34,
+                     94 if step in (0, 4) else 70)
 
-        guitar_root = root + 12
-        power = [guitar_root, guitar_root + 7, guitar_root + 12]
-        for pos in (0.0, .75, 2.0, 3.0):
-            for pitch in power:
-                add_note(events, "Megalo Background Guitar", start + pos, pitch, .24,
-                         69 if pos in (0.0, 2.0) else 52)
-        if bar >= 4:
-            add_pattern(events, "Megalo Over Guitar", start, melody[bar], 52, transpose=-12)
-
-        for pos in (0.0, 2.0, 2.75):
-            add_note(events, "Hopes POWER", start + pos, 36, .08, 104 if pos != 2.75 else 72)
+        # Firm rock rhythm, intentionally sparse.
+        for pos in (0.0, 2.0):
+            add_note(events, "Hopes POWER Drums", start + pos, 36, .08, 112)
         for pos in (1.0, 3.0):
-            add_note(events, "Hopes POWER", start + pos, 38, .09, 114)
+            add_note(events, "Hopes POWER Drums", start + pos, 38, .08, 118)
         for step in range(8):
-            add_note(events, "Hopes POWER", start + step * .5, 42, .045,
-                     44 if step % 2 else 58)
-        if bar == 7:
+            add_note(events, "Hopes POWER Drums", start + step * .5, 42, .04,
+                     48 if step % 2 else 60)
+        if bar in (3, 7):
             for off, drum in ((3.0, 45), (3.25, 47), (3.5, 48), (3.75, 50)):
-                add_note(events, "Hopes POWER", start + off, drum, .06, 82)
-        if bar in (0, 4, 7):
-            add_chord(events, "Megalo Impact", start,
-                      [chords[bar][0], chords[bar][2]], .18, 86)
+                add_note(events, "Hopes POWER Drums", start + off, drum, .06, 86)
 
     return events
 
@@ -153,8 +130,8 @@ def render_stem(soundfont: Path, bank: int, preset: int,
     if result != 0:
         synth.delete()
         raise RuntimeError(f"Cannot select bank={bank}, preset={preset}")
-    synth.set_reverb(roomsize=.12, damping=.70, width=.66, level=.065)
-    synth.set_chorus(nr=2, level=.10, speed=.24, depth=1.6, type=0)
+    synth.set_reverb(roomsize=.10, damping=.72, width=.62, level=.05)
+    synth.set_chorus(nr=2, level=.08, speed=.22, depth=1.4, type=0)
 
     timeline = []
     for start, duration, note, velocity in events:
@@ -197,7 +174,7 @@ def write_wav(path: Path, audio: np.ndarray) -> None:
 def encode_mp3(wav_path: Path, mp3_path: Path) -> None:
     subprocess.run([
         "ffmpeg", "-y", "-loglevel", "error", "-i", str(wav_path),
-        "-af", "highpass=f=30,lowpass=f=12500,acompressor=threshold=-18dB:ratio=2:attack=9:release=120,alimiter=limit=0.96",
+        "-af", "highpass=f=35,lowpass=f=12000,acompressor=threshold=-18dB:ratio=2:attack=8:release=110,alimiter=limit=0.96",
         "-codec:a", "libmp3lame", "-q:a", "2", str(mp3_path),
     ], check=True)
 
@@ -255,28 +232,22 @@ def main() -> None:
     melody = np.zeros_like(context)
 
     context_gains = {
-        "Megalo Over Guitar": .48,
-        "Megalo Square25": .22,
-        "Megalo Impact": .42,
-        "Megalo Background Guitar": .42,
-        "Megalo Bass": .64,
-        "Hopes Piano1": .66,
-        "Hopes POWER": .68,
-        "Hopes Pulse25": .20,
-        "Hopes Duty": .0,
-        "Hopes Lead Guitar": .58,
+        "MEGALOVANIA Main Lead": .82,
+        "Hopes Main Lead": .78,
+        "MEGALOVANIA Bass": .58,
+        "Hopes POWER Drums": .62,
     }
     melody_gains = {
-        "Hopes Piano1": .86,
-        "Hopes Lead Guitar": .22,
+        "MEGALOVANIA Main Lead": .92,
+        "Hopes Main Lead": .92,
     }
 
     selected = [
         f"BPM: {BPM}",
-        "Key: E minor",
-        "Completely new melody; not a variation of the previous D-minor proof.",
-        "Only MEGALOVANIA and Hopes and Dreams track-group presets.",
-        "No saxophone, clarinet, flute, trumpet, brass, violin, strings, choir, or organ.",
+        "Key: D minor",
+        "Only two headline lead timbres: MEGALOVANIA Overdriven Guitar and Hopes and Dreams Lead Guitar.",
+        "No piano, square, pulse, organ, saxophone, clarinet, flute, trumpet, brass, violin, strings, or choir.",
+        "Bass and POWER drums are rhythm support only.",
         "",
     ]
 
@@ -291,17 +262,17 @@ def main() -> None:
         if name in melody_gains:
             melody[:length] += stem[:length] * melody_gains[name]
 
-    context = np.tanh(context * 1.03)
+    context = np.tanh(context * 1.02)
     melody = np.tanh(melody * 1.00)
 
-    melody_wav = args.out / "KRIS_NEW_FROM_ZERO_8BAR_MELODY.wav"
-    context_wav = args.out / "KRIS_NEW_FROM_ZERO_8BAR_CONTEXT.wav"
+    melody_wav = args.out / "KRIS_TWO_MAIN_LEADS_MELODY.wav"
+    context_wav = args.out / "KRIS_TWO_MAIN_LEADS_CONTEXT.wav"
     write_wav(melody_wav, melody)
     write_wav(context_wav, context)
-    encode_mp3(melody_wav, args.out / "KRIS_NEW_FROM_ZERO_8BAR_MELODY.mp3")
-    encode_mp3(context_wav, args.out / "KRIS_NEW_FROM_ZERO_8BAR_CONTEXT.mp3")
-    export_midi(args.out / "KRIS_NEW_FROM_ZERO_8BAR.mid", events)
-    (args.out / "KRIS_NEW_FROM_ZERO_8BAR_INSTRUMENTS.txt").write_text(
+    encode_mp3(melody_wav, args.out / "KRIS_TWO_MAIN_LEADS_MELODY.mp3")
+    encode_mp3(context_wav, args.out / "KRIS_TWO_MAIN_LEADS_CONTEXT.mp3")
+    export_midi(args.out / "KRIS_TWO_MAIN_LEADS.mid", events)
+    (args.out / "KRIS_TWO_MAIN_LEADS_INSTRUMENTS.txt").write_text(
         "\n".join(selected) + "\n", encoding="utf-8"
     )
     print("\n".join(selected))
