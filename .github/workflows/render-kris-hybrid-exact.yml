@@ -1,0 +1,59 @@
+name: Render Kris exact Undertale hybrid
+
+on:
+  pull_request:
+    paths:
+      - 'Tools/render_kris_hybrid.py'
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install audio tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fluidsynth libfluidsynth-dev ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install numpy mido pyfluidsynth sf2utils gdown
+
+      - name: Download exact SGM V2.01 and UNDERTALE Soundfont 2
+        run: |
+          set -euxo pipefail
+          mkdir -p soundfonts/sgm1 soundfonts/sgm2 soundfonts/sgm3
+          base='https://github.com/open-soundfonts/SGM_V2_01_soundfonts/raw/refs/heads/master'
+          curl -fL --retry 5 --retry-delay 3 "$base/SGM_V2_01_part1.sf2.tar.gz" -o sgm1.tar.gz
+          curl -fL --retry 5 --retry-delay 3 "$base/SGM_V2_01_part2.sf2.tar.gz" -o sgm2.tar.gz
+          curl -fL --retry 5 --retry-delay 3 "$base/SGM_V2_01_part3.sf2.tar.gz" -o sgm3.tar.gz
+          tar -xzf sgm1.tar.gz -C soundfonts/sgm1
+          tar -xzf sgm2.tar.gz -C soundfonts/sgm2
+          tar -xzf sgm3.tar.gz -C soundfonts/sgm3
+          gdown 'https://drive.google.com/uc?id=1QRtU4HBE8k3uqxA957TccN5a-RB8N6_L' -O soundfonts/UNDERTALE_Soundfont_2.sf2
+          test -s soundfonts/UNDERTALE_Soundfont_2.sf2
+
+      - name: Render exact hybrid theme
+        run: |
+          sgm1="$(find soundfonts/sgm1 -type f -name '*.sf2' | head -n1)"
+          sgm2="$(find soundfonts/sgm2 -type f -name '*.sf2' | head -n1)"
+          sgm3="$(find soundfonts/sgm3 -type f -name '*.sf2' | head -n1)"
+          python Tools/render_kris_hybrid.py \
+            --undertale soundfonts/UNDERTALE_Soundfont_2.sf2 \
+            --sgm1 "$sgm1" --sgm2 "$sgm2" --sgm3 "$sgm3" \
+            --out Build/KrisBadMemoryExact
+
+      - name: Upload exact theme
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kris-Bad-Memory-Exact-Undertale-Instruments
+          path: Build/KrisBadMemoryExact/*
+          if-no-files-found: error
+          retention-days: 7
