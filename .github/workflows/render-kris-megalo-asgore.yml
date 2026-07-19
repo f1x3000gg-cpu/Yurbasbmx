@@ -1,0 +1,43 @@
+name: Render Kris Megalovania and ASGORE proof
+
+on:
+  pull_request:
+    paths:
+      - 'Tools/render_kris_megalo_asgore.py'
+      - '.github/render-trigger/kris-megalo-asgore-*'
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install audio tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fluidsynth libfluidsynth-dev ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install numpy mido pyfluidsynth gdown
+      - name: Download UNDERTALE Soundfont 2
+        run: |
+          mkdir -p soundfonts
+          gdown 'https://drive.google.com/uc?id=1QRtU4HBE8k3uqxA957TccN5a-RB8N6_L' -O soundfonts/UNDERTALE_Soundfont_2.sf2
+          test -s soundfonts/UNDERTALE_Soundfont_2.sf2
+      - name: Render proof
+        run: |
+          python Tools/render_kris_megalo_asgore.py \
+            --soundfont soundfonts/UNDERTALE_Soundfont_2.sf2 \
+            --out Build/KrisMegaloAsgore
+      - name: Upload rendered proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kris-Megalo-ASGORE-Proof
+          path: Build/KrisMegaloAsgore/*
+          if-no-files-found: error
+          retention-days: 7
