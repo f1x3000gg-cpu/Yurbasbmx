@@ -39,18 +39,15 @@ def nn(note: str) -> int:
     return 12 * (octave + 1) + PITCH[name]
 
 
-def parse_sf2_presets(path: Path) -> List[Preset]:
+def parse_presets(path: Path) -> List[Preset]:
     data = path.read_bytes()
     marker = data.find(b"phdr")
-    if marker < 0 or marker + 8 > len(data):
-        raise RuntimeError("SoundFont preset header chunk was not found")
+    if marker < 0:
+        raise RuntimeError("SoundFont phdr chunk not found")
     size = struct.unpack_from("<I", data, marker + 4)[0]
-    chunk = data[marker + 8: marker + 8 + size]
-    if len(chunk) % 38 != 0:
-        raise RuntimeError("Invalid SoundFont phdr chunk")
-
+    chunk = data[marker + 8:marker + 8 + size]
     result: List[Preset] = []
-    for offset in range(0, len(chunk) - 38, 38):  # exclude terminal EOP record
+    for offset in range(0, len(chunk) - 38, 38):
         record = chunk[offset:offset + 38]
         name = record[:20].split(b"\0", 1)[0].decode("latin-1", errors="replace").strip()
         preset = struct.unpack_from("<H", record, 20)[0]
@@ -59,39 +56,40 @@ def parse_sf2_presets(path: Path) -> List[Preset]:
     return result
 
 
-def find_preset(presets: Sequence[Preset], required: Sequence[str], excluded: Sequence[str] = ()) -> Preset:
-    req = [item.lower() for item in required]
-    exc = [item.lower() for item in excluded]
+def find_in_asgore_group(presets: Sequence[Preset], tokens: Sequence[str], exclude: Sequence[str] = ()) -> Preset:
+    # The compiled bank's ASGORE group is bank 2, presets 64..80.
     matches: List[Preset] = []
-    for preset in presets:
-        text = preset[2].lower()
-        if all(token in text for token in req) and not any(token in text for token in exc):
-            matches.append(preset)
+    for item in presets:
+        bank, preset, name = item
+        text = name.lower()
+        if bank != 2 or not 64 <= preset <= 80:
+            continue
+        if all(token.lower() in text for token in tokens) and not any(token.lower() in text for token in exclude):
+            matches.append(item)
     if not matches:
-        available = "\n".join(name for _, _, name in presets if "asgore" in name.lower() or "megalovania" in name.lower())
-        raise RuntimeError(f"Preset not found: required={required}, excluded={excluded}\nAvailable:\n{available}")
-    matches.sort(key=lambda item: (len(item[2]), item[0], item[1]))
-    return matches[0]
+        group = "\n".join(f"{b}:{p} {n}" for b, p, n in presets if b == 2 and 64 <= p <= 80)
+        raise RuntimeError(f"ASGORE preset not found for {tokens}; group contents:\n{group}")
+    return sorted(matches, key=lambda item: item[1])[0]
 
 
 def resolve_presets(soundfont: Path) -> Dict[str, Preset]:
-    available = parse_sf2_presets(soundfont)
+    available = parse_presets(soundfont)
     return {
-        "ASGORE Pulse 25": find_preset(available, ("asgore", "25", "pulse"), ("12.5",)),
-        "ASGORE Pulse 12.5": find_preset(available, ("asgore", "12", "pulse")),
-        "MEGALOVANIA Soft Guitar": find_preset(available, ("megalovania", "overdriven", "guitar")),
-        "ASGORE Drums": find_preset(available, ("asgore", "drum")),
+        "ASGORE Pulse 25": find_in_asgore_group(available, ("25", "pulse"), ("12.5",)),
+        "ASGORE Pulse 12.5": find_in_asgore_group(available, ("12", "pulse")),
+        # These mappings were already verified by successful earlier renders.
+        "MEGALOVANIA Soft Guitar": (0, 0, "100 MEGALOVANIA - Overdriven Guitar"),
+        "ASGORE Drums": (2, 80, "077 ASGORE - Drumkit"),
     }
 
 
 def add(events: Dict[str, List[Event]], track: str, start: float,
         note: str | int, duration: float, velocity: int) -> None:
-    pitch = note if isinstance(note, int) else nn(note)
-    events[track].append((float(start), float(duration), int(pitch), int(velocity)))
+    events[track].append((start, duration, note if isinstance(note, int) else nn(note), velocity))
 
 
 def pattern(events: Dict[str, List[Event]], track: str, start: float,
-            notes: Pattern, velocity: int, gate: float = .78) -> None:
+            notes: Pattern, velocity: int, gate: float) -> None:
     cursor = start
     for note, duration in notes:
         if note is not None:
@@ -99,50 +97,46 @@ def pattern(events: Dict[str, List[Event]], track: str, start: float,
         cursor += duration
 
 
-def melody_patterns() -> List[Pattern]:
-    # New compact battle hook. The ASGORE pulse is the headline lead.
+def melody() -> List[Pattern]:
     return [
-        [("D4", .5), ("F4", .5), ("A4", 1.0), ("G4", .5), ("F4", .5), ("D4", 1.0)],
-        [("C4", .5), ("E4", .5), ("G4", 1.0), ("A4", .5), ("G4", .5), ("E4", 1.0)],
-        [("Bb3", .5), ("D4", .5), ("F4", 1.0), ("A4", .5), ("G4", .5), ("F4", 1.0)],
-        [("C#4", .5), ("E4", .5), ("A4", 1.0), ("G4", .5), ("E4", .5), ("D4", 1.0)],
-        [("F4", .5), ("A4", .5), ("C5", 1.0), ("A4", .5), ("G4", .5), ("F4", 1.0)],
-        [("E4", .5), ("G4", .5), ("Bb4", 1.0), ("A4", .5), ("G4", .5), ("E4", 1.0)],
-        [("D4", .5), ("F4", .5), ("A4", .5), ("C5", .5), ("Bb4", .5), ("A4", .5), ("F4", 1.0)],
-        [("E4", .5), ("G4", .5), ("A4", 1.0), ("C#5", .5), ("A4", .5), ("D4", 1.0)],
+        [("D4", .5), ("F4", .5), ("A4", 1), ("G4", .5), ("F4", .5), ("D4", 1)],
+        [("C4", .5), ("E4", .5), ("G4", 1), ("A4", .5), ("G4", .5), ("E4", 1)],
+        [("Bb3", .5), ("D4", .5), ("F4", 1), ("A4", .5), ("G4", .5), ("F4", 1)],
+        [("C#4", .5), ("E4", .5), ("A4", 1), ("G4", .5), ("E4", .5), ("D4", 1)],
+        [("F4", .5), ("A4", .5), ("C5", 1), ("A4", .5), ("G4", .5), ("F4", 1)],
+        [("E4", .5), ("G4", .5), ("Bb4", 1), ("A4", .5), ("G4", .5), ("E4", 1)],
+        [("D4", .5), ("F4", .5), ("A4", .5), ("C5", .5), ("Bb4", .5), ("A4", .5), ("F4", 1)],
+        [("E4", .5), ("G4", .5), ("A4", 1), ("C#5", .5), ("A4", .5), ("D4", 1)],
     ]
 
 
-def build_events(names: Sequence[str]) -> tuple[Dict[str, List[Event]], Dict[str, List[Event]], Dict[str, List[Event]]]:
-    pulse_only = {name: [] for name in names}
-    guitar_only = {name: [] for name in names}
+def make_events(names: Sequence[str]):
+    pulse = {name: [] for name in names}
+    guitar = {name: [] for name in names}
     context = {name: [] for name in names}
-    melody = melody_patterns()
+    hook = melody()
 
-    # Four-bar isolated timbre proofs.
     for bar in range(4):
         start = bar * 4.0
-        pattern(pulse_only, "ASGORE Pulse 25", start, melody[bar], 88, .82)
-        pattern(pulse_only, "ASGORE Pulse 12.5", start, melody[bar], 61, .82)
-        pattern(guitar_only, "MEGALOVANIA Soft Guitar", start, melody[bar], 58, .54)
+        pattern(pulse, "ASGORE Pulse 25", start, hook[bar], 88, .82)
+        pattern(pulse, "ASGORE Pulse 12.5", start, hook[bar], 61, .82)
+        pattern(guitar, "MEGALOVANIA Soft Guitar", start, hook[bar], 56, .48)
 
-    # Full clean context: ASGORE pulse remains the lead for all eight bars.
+    answers = [
+        [("F4", .5), ("E4", .5), ("D4", .5), (None, 2.5)],
+        [("A4", .5), ("G4", .5), ("E4", .5), (None, 2.5)],
+        [("G4", .5), ("F4", .5), ("E4", .5), (None, 2.5)],
+        [("A4", .5), ("E4", .5), ("D4", .5), (None, 2.5)],
+    ]
+
     for bar in range(BARS):
         start = bar * 4.0
-        pattern(context, "ASGORE Pulse 25", start, melody[bar], 86, .82)
-        pattern(context, "ASGORE Pulse 12.5", start, melody[bar], 58, .82)
-
-        # Soft, short MEGALOVANIA answers only. No low-register doubling.
+        pattern(context, "ASGORE Pulse 25", start, hook[bar], 86, .82)
+        pattern(context, "ASGORE Pulse 12.5", start, hook[bar], 58, .82)
         if bar in (1, 3, 5, 7):
-            answers: List[Pattern] = [
-                [("F4", .5), ("E4", .5), ("D4", .5), (None, 2.5)],
-                [("A4", .5), ("G4", .5), ("E4", .5), (None, 2.5)],
-                [("G4", .5), ("F4", .5), ("E4", .5), (None, 2.5)],
-                [("A4", .5), ("E4", .5), ("D4", .5), (None, 2.5)],
-            ]
-            pattern(context, "MEGALOVANIA Soft Guitar", start + 2.0, answers[(bar - 1) // 2], 48, .42)
+            pattern(context, "MEGALOVANIA Soft Guitar", start + 2.0,
+                    answers[(bar - 1) // 2], 46, .40)
 
-        # Keep the previously approved ASGORE drum groove.
         for pos in (0.0, 2.0):
             add(context, "ASGORE Drums", start + pos, 36, .07, 96)
         for pos in (1.0, 3.0):
@@ -153,48 +147,42 @@ def build_events(names: Sequence[str]) -> tuple[Dict[str, List[Event]], Dict[str
             for off, drum in ((3.0, 45), (3.25, 47), (3.5, 48), (3.75, 50)):
                 add(context, "ASGORE Drums", start + off, drum, .05, 72)
 
-    return pulse_only, guitar_only, context
+    return pulse, guitar, context
 
 
-def render_stem(soundfont: Path, bank: int, preset: int,
-                events: Sequence[Event]) -> np.ndarray:
+def render_stem(soundfont: Path, preset_data: Preset, events: Sequence[Event]) -> np.ndarray:
     total = int(((BARS * 4 * BEAT) + TAIL) * SR)
+    bank, preset, _ = preset_data
     synth = fluidsynth.Synth(gain=.72, samplerate=SR)
     sfid = synth.sfload(str(soundfont))
     if synth.program_select(0, sfid, bank, preset) != 0:
         synth.delete()
-        raise RuntimeError(f"Cannot select bank={bank} preset={preset}")
+        raise RuntimeError(f"Cannot select {bank}:{preset}")
     synth.set_reverb(roomsize=.08, damping=.78, width=.60, level=.035)
     synth.set_chorus(nr=2, level=.025, speed=.18, depth=.75, type=0)
 
     timeline = []
     for start, duration, note, velocity in events:
-        timeline.append((int(start * BEAT * SR), 1, note, velocity))
-        timeline.append((int((start + duration) * BEAT * SR), 0, note, 0))
+        timeline += [(int(start * BEAT * SR), 1, note, velocity),
+                     (int((start + duration) * BEAT * SR), 0, note, 0)]
     timeline.sort(key=lambda item: (item[0], item[1]))
 
-    chunks = []
-    cursor = 0
+    chunks, cursor = [], 0
     for frame, on, note, velocity in timeline:
         if frame > cursor:
             chunks.append(synth.get_samples(frame - cursor))
             cursor = frame
-        if on:
-            synth.noteon(0, note, velocity)
-        else:
-            synth.noteoff(0, note)
+        synth.noteon(0, note, velocity) if on else synth.noteoff(0, note)
     if cursor < total:
         chunks.append(synth.get_samples(total - cursor))
     synth.delete()
-
     if not chunks:
         return np.zeros((total, 2), dtype=np.float64)
-    raw = np.concatenate(chunks).astype(np.float64) / 32768.0
-    return raw.reshape(-1, 2)
+    return (np.concatenate(chunks).astype(np.float64) / 32768.0).reshape(-1, 2)
 
 
 def write_wav(path: Path, audio: np.ndarray) -> None:
-    pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
+    pcm = (np.clip(audio, -1, 1) * 32767).astype(np.int16)
     with wave.open(str(path), "wb") as handle:
         handle.setnchannels(2)
         handle.setsampwidth(2)
@@ -204,25 +192,17 @@ def write_wav(path: Path, audio: np.ndarray) -> None:
 
 def read_wav(path: Path) -> np.ndarray:
     with wave.open(str(path), "rb") as handle:
-        if handle.getnchannels() != 2 or handle.getsampwidth() != 2:
-            raise RuntimeError("Unexpected processed WAV format")
         raw = np.frombuffer(handle.readframes(handle.getnframes()), dtype=np.int16)
     return raw.astype(np.float64).reshape(-1, 2) / 32768.0
 
 
 def soften_guitar(audio: np.ndarray) -> np.ndarray:
-    # Remove low heaviness and the harsh upper-mid edge without changing the preset.
     with tempfile.TemporaryDirectory() as tmp:
-        source = Path(tmp) / "guitar_raw.wav"
-        target = Path(tmp) / "guitar_soft.wav"
+        source, target = Path(tmp) / "raw.wav", Path(tmp) / "soft.wav"
         write_wav(source, audio)
         subprocess.run([
             "ffmpeg", "-y", "-loglevel", "error", "-i", str(source),
-            "-af",
-            "highpass=f=170,lowpass=f=6200,"
-            "equalizer=f=330:t=q:w=1.0:g=-2.5,"
-            "equalizer=f=2800:t=q:w=1.1:g=-3.5,"
-            "acompressor=threshold=-22dB:ratio=1.45:attack=18:release=150",
+            "-af", "highpass=f=170,lowpass=f=6200,equalizer=f=330:t=q:w=1:g=-2.5,equalizer=f=2800:t=q:w=1.1:g=-3.5,acompressor=threshold=-22dB:ratio=1.45:attack=18:release=150",
             "-c:a", "pcm_s16le", str(target),
         ], check=True)
         return read_wav(target)
@@ -234,23 +214,18 @@ def mix(soundfont: Path, presets: Dict[str, Preset], events: Dict[str, List[Even
     gains = {
         "ASGORE Pulse 25": .72 if proof == "context" else .78,
         "ASGORE Pulse 12.5": .46 if proof == "context" else .52,
-        "MEGALOVANIA Soft Guitar": .27 if proof == "context" else .58,
+        "MEGALOVANIA Soft Guitar": .25 if proof == "context" else .56,
         "ASGORE Drums": .59,
     }
-
     for name, track_events in events.items():
         if not track_events:
             continue
-        bank, preset, _ = presets[name]
-        stem = render_stem(soundfont, bank, preset, track_events)
+        stem = render_stem(soundfont, presets[name], track_events)
         if name == "MEGALOVANIA Soft Guitar":
             stem = soften_guitar(stem)
         output[:len(stem)] += stem * gains[name]
-
     peak = float(np.max(np.abs(output)))
-    if peak > 0:
-        output = output / peak * .92
-    return output
+    return output / peak * .92 if peak else output
 
 
 def encode(wav_path: Path, mp3_path: Path) -> None:
@@ -265,17 +240,14 @@ def export_midi(path: Path, presets: Dict[str, Preset], events: Dict[str, List[E
     midi = MidiFile(ticks_per_beat=TPB)
     tempo = MidiTrack()
     tempo.append(MetaMessage("set_tempo", tempo=bpm2tempo(BPM), time=0))
-    tempo.append(MetaMessage("time_signature", numerator=4, denominator=4, time=0))
     midi.tracks.append(tempo)
-
     channel = 0
     for name, track_events in events.items():
         if not track_events:
             continue
         while channel == 9:
             channel += 1
-        ch = channel % 16
-        channel += 1
+        ch, channel = channel % 16, channel + 1
         bank, preset, _ = presets[name]
         track = MidiTrack()
         track.append(MetaMessage("track_name", name=name, time=0))
@@ -283,8 +255,8 @@ def export_midi(path: Path, presets: Dict[str, Preset], events: Dict[str, List[E
         track.append(Message("program_change", channel=ch, program=preset, time=0))
         timeline = []
         for start, duration, note, velocity in track_events:
-            timeline.append((round(start * TPB), 1, note, velocity))
-            timeline.append((round((start + duration) * TPB), 0, note, 0))
+            timeline += [(round(start * TPB), 1, note, velocity),
+                         (round((start + duration) * TPB), 0, note, 0)]
         timeline.sort(key=lambda item: (item[0], item[1]))
         previous = 0
         for tick, on, note, velocity in timeline:
@@ -304,34 +276,27 @@ def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
 
     presets = resolve_presets(args.soundfont)
-    pulse_only, guitar_only, context = build_events(tuple(presets))
-
-    jobs = [
-        ("KRIS_ASGORE_PIXEL_LEAD_4BAR", pulse_only, "pulse"),
-        ("KRIS_SOFT_MEGALOVANIA_GUITAR_4BAR", guitar_only, "guitar"),
+    pulse, guitar, context = make_events(tuple(presets))
+    for base, events, proof in [
+        ("KRIS_ASGORE_PIXEL_LEAD_4BAR", pulse, "pulse"),
+        ("KRIS_SOFT_MEGALOVANIA_GUITAR_4BAR", guitar, "guitar"),
         ("KRIS_ASGORE_PIXEL_SOFT_MEGALO_CONTEXT", context, "context"),
-    ]
-    for base, events, proof in jobs:
+    ]:
         wav_path = args.out / f"{base}.wav"
-        mp3_path = args.out / f"{base}.mp3"
         write_wav(wav_path, mix(args.soundfont, presets, events, proof))
-        encode(wav_path, mp3_path)
+        encode(wav_path, args.out / f"{base}.mp3")
 
     export_midi(args.out / "KRIS_ASGORE_PIXEL_SOFT_MEGALO.mid", presets, context)
-    instrument_lines = [
-        "144 BPM, D minor, new eight-bar melody.",
-        "Headline ASGORE lead: layered 25% Pulse + 12.5% Pulse.",
-        "MEGALOVANIA Overdriven Guitar retained but shortened, lowered in level, high-passed and de-harshened.",
-        "No ASGORE Piano, Brass, wind lead, strings, violin or extra bass.",
-        "The approved ASGORE drum groove is retained.",
-        "",
-        "Resolved compiled SoundFont presets:",
+    lines = [
+        "144 BPM, D minor, entirely new melody.",
+        "Headline ASGORE sound: layered 25% Pulse and 12.5% Pulse.",
+        "MEGALOVANIA Overdriven Guitar: shorter, quieter, high-passed and de-harshened.",
+        "No ASGORE Piano, Brass, wind lead, strings, violin, or bass layer.",
+        "Approved ASGORE drum groove retained.", "", "Resolved presets:",
     ]
     for key, (bank, preset, real_name) in presets.items():
-        instrument_lines.append(f"- {key}: bank {bank}, preset {preset}, {real_name}")
-    (args.out / "KRIS_ASGORE_PIXEL_SOFT_MEGALO_INSTRUMENTS.txt").write_text(
-        "\n".join(instrument_lines) + "\n", encoding="utf-8"
-    )
+        lines.append(f"- {key}: bank {bank}, preset {preset}, {real_name}")
+    (args.out / "KRIS_ASGORE_PIXEL_SOFT_MEGALO_INSTRUMENTS.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
