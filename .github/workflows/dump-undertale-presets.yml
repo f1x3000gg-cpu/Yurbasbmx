@@ -28,21 +28,34 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           from sf2utils.sf2parse import Sf2File
+
           sf = Path('Build/PresetDump/UNDERTALE_Soundfont_2.sf2')
+          lines=[]
+          debug=[]
           with sf.open('rb') as f:
               data = Sf2File(f)
-              lines=[]
-              for p in data.presets:
-                  name=p.name.decode('latin1','replace') if isinstance(p.name,bytes) else str(p.name)
-                  lines.append(f'{int(p.bank):03d}\t{int(p.preset):03d}\t{name}')
+              for index, p in enumerate(data.presets):
+                  try:
+                      raw_name=getattr(p,'name',f'preset_{index}')
+                      name=raw_name.decode('latin1','replace') if isinstance(raw_name,bytes) else str(raw_name)
+                      raw_bank=getattr(p,'bank',0)
+                      raw_program=getattr(p,'preset',getattr(p,'program',index))
+                      bank=int(raw_bank)
+                      program=int(raw_program)
+                      lines.append(f'{bank:03d}\t{program:03d}\t{name}')
+                  except Exception as exc:
+                      debug.append(f'{index}: {type(exc).__name__}: {exc!s}; attrs={dir(p)!r}')
           Path('Build/PresetDump/ALL_PRESETS.txt').write_text('\n'.join(lines)+'\n',encoding='utf-8')
-          for terms, outname in [
+          Path('Build/PresetDump/PARSER_DEBUG.txt').write_text('\n'.join(debug)+'\n',encoding='utf-8')
+          groups=[
               (['087','hope','dream','shredd','glock','flute','viola','choir','power','piano'], 'POPULAR_087_HOPES.txt'),
               (['098','hero','romantic','piccolo','tubular','violin','nylon','choir','power','piano'], 'POPULAR_098_HERO.txt'),
               (['100','megalo','overdrive','shredd','brass','organ','impact','choir','saw','square','pulse'], 'POPULAR_100_MEGALO.txt'),
-          ]:
+          ]
+          for terms, outname in groups:
               selected=[line for line in lines if any(t.casefold() in line.casefold() for t in terms)]
               Path('Build/PresetDump/'+outname).write_text('\n'.join(selected)+'\n',encoding='utf-8')
+          print(f'dumped {len(lines)} presets; errors={len(debug)}')
           PY
       - name: Upload preset dump
         uses: actions/upload-artifact@v4
