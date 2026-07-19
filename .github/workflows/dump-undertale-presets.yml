@@ -1,0 +1,53 @@
+name: Dump UNDERTALE Soundfont presets
+
+on:
+  pull_request:
+    paths:
+      - '.github/render-trigger/dump-undertale-presets-*'
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install parser
+        run: python -m pip install sf2utils gdown
+      - name: Download UNDERTALE Soundfont 2
+        run: |
+          mkdir -p Build/PresetDump
+          gdown 'https://drive.google.com/uc?id=1QRtU4HBE8k3uqxA957TccN5a-RB8N6_L' -O Build/PresetDump/UNDERTALE_Soundfont_2.sf2
+      - name: Dump all preset names
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from sf2utils.sf2parse import Sf2File
+          sf = Path('Build/PresetDump/UNDERTALE_Soundfont_2.sf2')
+          with sf.open('rb') as f:
+              data = Sf2File(f)
+              lines=[]
+              for p in data.presets:
+                  name=p.name.decode('latin1','replace') if isinstance(p.name,bytes) else str(p.name)
+                  lines.append(f'{int(p.bank):03d}\t{int(p.preset):03d}\t{name}')
+          Path('Build/PresetDump/ALL_PRESETS.txt').write_text('\n'.join(lines)+'\n',encoding='utf-8')
+          for terms, outname in [
+              (['087','hope','dream','shredd','glock','flute','viola','choir','power','piano'], 'POPULAR_087_HOPES.txt'),
+              (['098','hero','romantic','piccolo','tubular','violin','nylon','choir','power','piano'], 'POPULAR_098_HERO.txt'),
+              (['100','megalo','overdrive','shredd','brass','organ','impact','choir','saw','square','pulse'], 'POPULAR_100_MEGALO.txt'),
+          ]:
+              selected=[line for line in lines if any(t.casefold() in line.casefold() for t in terms)]
+              Path('Build/PresetDump/'+outname).write_text('\n'.join(selected)+'\n',encoding='utf-8')
+          PY
+      - name: Upload preset dump
+        uses: actions/upload-artifact@v4
+        with:
+          name: Undertale-Soundfont-2-Preset-Dump
+          path: Build/PresetDump/*.txt
+          if-no-files-found: error
+          retention-days: 7
