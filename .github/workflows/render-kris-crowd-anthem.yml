@@ -1,0 +1,48 @@
+name: Render Kris melody-led popular Undertale anthem
+
+on:
+  pull_request:
+    paths:
+      - 'Tools/render_kris_crowd_anthem.py'
+      - '.github/render-trigger/kris-crowd-anthem-*'
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install audio tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fluidsynth libfluidsynth-dev ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install numpy mido pyfluidsynth gdown
+
+      - name: Download UNDERTALE Soundfont 2
+        run: |
+          mkdir -p soundfonts
+          gdown 'https://drive.google.com/uc?id=1QRtU4HBE8k3uqxA957TccN5a-RB8N6_L' -O soundfonts/UNDERTALE_Soundfont_2.sf2
+          test -s soundfonts/UNDERTALE_Soundfont_2.sf2
+
+      - name: Render melody-led anthem
+        run: |
+          python Tools/render_kris_crowd_anthem.py \
+            --soundfont soundfonts/UNDERTALE_Soundfont_2.sf2 \
+            --out Build/KrisCrowdAnthem
+
+      - name: Upload rendered theme
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kris-Last-Promise-Popular-Undertale-Instruments
+          path: Build/KrisCrowdAnthem/*
+          if-no-files-found: error
+          retention-days: 7
