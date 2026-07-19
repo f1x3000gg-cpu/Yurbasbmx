@@ -1,0 +1,1 @@
+render KRIS_SERIOUS_THEME
