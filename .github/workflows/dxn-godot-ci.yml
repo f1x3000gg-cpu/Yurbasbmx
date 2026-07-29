@@ -26,105 +26,20 @@ jobs:
           test -f dxn_car_sandbox_v5/project.godot
           find dxn_car_sandbox_v5 -type f | sort
 
-      - name: Apply revision 02 parser fixes
+      - name: Apply ordered DXN revisions
         shell: bash
         run: |
           set -euo pipefail
-          patch -p1 <<'PATCH'
-          --- a/dxn_car_sandbox_v5/scripts/vehicle/powertrain/differential_model.gd
-          +++ b/dxn_car_sandbox_v5/scripts/vehicle/powertrain/differential_model.gd
-          @@ -43,10 +43,10 @@
-           	speed_difference = left_wheel_omega - right_wheel_omega
-           	power_side = input_torque >= 0.0
-           	var lock_fraction: float = config.differential_power_lock if power_side else config.differential_coast_lock
-          -	var preload: float = config.differential_preload_nm
-          +	var preload_torque: float = config.differential_preload_nm
-           	var viscous_lock: float = speed_difference * 9.5
-           	var ramp_lock: float = abs(input_torque) * lock_fraction * DXNMath.soft_sign(speed_difference, 0.75)
-          -	locking_torque = clamp(preload * DXNMath.soft_sign(speed_difference, 0.4) + viscous_lock + ramp_lock, -abs(input_torque) * 0.48 - preload, abs(input_torque) * 0.48 + preload)
-          +	locking_torque = clamp(preload_torque * DXNMath.soft_sign(speed_difference, 0.4) + viscous_lock + ramp_lock, -abs(input_torque) * 0.48 - preload_torque, abs(input_torque) * 0.48 + preload_torque)
-           
-           	var base_torque: float = input_torque * 0.5
-           	var reaction_difference: float = left_reaction_torque - right_reaction_torque
-          --- a/dxn_car_sandbox_v5/tests/parse_all.gd
-          +++ b/dxn_car_sandbox_v5/tests/parse_all.gd
-          @@ -1,6 +1,6 @@
-           extends SceneTree
-           
-          -const SCRIPT_PATHS: PackedStringArray = PackedStringArray([
-          +var script_paths: PackedStringArray = PackedStringArray([
-           	"res://scripts/core/dxn_math.gd",
-           	"res://scripts/core/curve_table.gd",
-           	"res://scripts/core/rigid_body_state.gd",
-          @@ -51,7 +51,7 @@
-           
-           func _initialize() -> void:
-           	var failures: PackedStringArray = PackedStringArray()
-          -	for path in SCRIPT_PATHS:
-          +	for path in script_paths:
-           		if not ResourceLoader.exists(path, "Script"):
-           			failures.append("MISSING " + path)
-           			continue
-          @@ -59,7 +59,7 @@
-           		if script == null:
-           			failures.append("FAILED TO LOAD " + path)
-           	if failures.is_empty():
-          -		print("DXN_PARSE_ALL_PASS scripts=", SCRIPT_PATHS.size())
-          +		print("DXN_PARSE_ALL_PASS scripts=", script_paths.size())
-           		quit(0)
-           	else:
-           		for failure in failures:
-          PATCH
-
-      - name: Apply revision 03 physics test API fixes
-        shell: bash
-        run: |
-          set -euo pipefail
-          patch -p1 <<'PATCH'
-          --- a/dxn_car_sandbox_v5/tests/physics_unit_tests.gd
-          +++ b/dxn_car_sandbox_v5/tests/physics_unit_tests.gd
-          @@ -57,11 +57,19 @@
-           	_check(rear_frequency > 1.2 and rear_frequency < 2.5, "rear natural frequency plausible")
-           	var spring: DXNSpringModel = DXNSpringModel.new()
-           	spring.configure(config)
-          -	_check(spring.calculate_force(0, 0.16) > spring.calculate_force(0, 0.08) * 2.0, "progressive spring increases faster than linear")
-          +	var test_wheel: DXNWheelRuntime = DXNWheelRuntime.new()
-          +	test_wheel.configure(0, "FL_TEST", config.wheel_hardpoint_local(0), true, true, false, config.front_rest_length)
-          +	test_wheel.suspension_length = config.front_rest_length - 0.08
-          +	var shallow_force: float = float(spring.calculate_force(test_wheel)["total_force"])
-          +	test_wheel.suspension_length = config.front_rest_length - 0.16
-          +	var deep_force: float = float(spring.calculate_force(test_wheel)["total_force"])
-          +	_check(deep_force > shallow_force * 2.0, "progressive spring increases faster than linear")
-           	var damper: DXNDamperModel = DXNDamperModel.new()
-           	damper.configure(config)
-          -	_check(damper.calculate_force(0, 0.20) > 0.0, "bump damper resists compression")
-          -	_check(damper.calculate_force(0, -0.20) < 0.0, "rebound damper resists extension")
-          +	test_wheel.suspension_velocity = 0.20
-          +	_check(damper.calculate_force(test_wheel) < 0.0, "bump damper opposes compression velocity")
-          +	test_wheel.suspension_velocity = -0.20
-          +	_check(damper.calculate_force(test_wheel) > 0.0, "rebound damper opposes extension velocity")
-           
-           func _test_tyre_forces(config: DXNVehicleConfig) -> void:
-           	var tyre: DXNTyreModel = DXNTyreModel.new()
-          @@ -140,7 +148,7 @@
-           	state.reset(Transform3D.IDENTITY)
-           	state.angular_velocity = Vector3(0.0, 1.0, 0.0)
-           	var integrator: DXNRigidBodyIntegrator = DXNRigidBodyIntegrator.new()
-          -	integrator.configure(Vector3.ZERO, 0.0, 0.0, 200.0, 20.0)
-          +	integrator.configure(Vector3.ZERO, 0.0, Vector3.ZERO, 200.0, 20.0)
-           	for _index in range(600):
-           		state.begin_step()
-           		integrator.integrate(state, 1.0 / 600.0)
-          @@ -173,7 +181,7 @@
-           	state.linear_velocity = Vector3(5000.0, -4000.0, 8000.0)
-           	state.angular_velocity = Vector3(400.0, 300.0, -500.0)
-           	var integrator: DXNRigidBodyIntegrator = DXNRigidBodyIntegrator.new()
-          -	integrator.configure(Vector3.ZERO, 0.0, 0.0, 95.0, 13.0)
-          +	integrator.configure(Vector3.ZERO, 0.0, Vector3.ZERO, 95.0, 13.0)
-           	state.begin_step()
-           	integrator.integrate(state, 1.0 / 120.0)
-           	_check(state.linear_velocity.length() <= 95.01, "linear velocity safety cap")
-          PATCH
+          shopt -s nullglob
+          revision_patches=(dxn_ci/patches/revision_*.patch)
+          if [ ${#revision_patches[@]} -eq 0 ]; then
+            echo "No DXN revision patches found"
+            exit 1
+          fi
+          for revision_patch in "${revision_patches[@]}"; do
+            echo "Applying ${revision_patch}"
+            patch --batch --forward -p0 < "${revision_patch}"
+          done
 
       - name: Install Godot 4.7.1 stable
         shell: bash
