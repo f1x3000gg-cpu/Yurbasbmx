@@ -1,0 +1,120 @@
+--- dxn_car_sandbox_v5/scripts/vehicle/suspension/damper_model.gd
++++ dxn_car_sandbox_v5/scripts/vehicle/suspension/damper_model.gd
+@@ -26,8 +26,12 @@
+ 		var excess: float = absolute_velocity - config.damper_blowoff_speed
+ 		force_magnitude -= excess * high_coefficient * 0.38
+ 	force_magnitude = clamp(force_magnitude, 0.0, config.damper_force_limit)
+-	var shaft_force: float = -sign(velocity) * force_magnitude
++	# suspension_velocity is positive when suspension length decreases. In
++	# bump, the damper pushes the sprung body upward and adds support; in
++	# rebound it pulls downward and removes support. The previous sign did the
++	# opposite and injected energy during extension, causing wheel hop.
++	var shaft_force: float = sign(velocity) * force_magnitude
+ 	return shaft_force * config.motion_ratio(wheel.index) * config.motion_ratio(wheel.index)
+ 
+ func dissipated_power(wheel: DXNWheelRuntime, force: float) -> float:
+-	return max(-force * wheel.suspension_velocity, 0.0)
++	return abs(force * wheel.suspension_velocity)
+--- dxn_car_sandbox_v5/scripts/vehicle/powertrain/gearbox_model.gd
++++ dxn_car_sandbox_v5/scripts/vehicle/powertrain/gearbox_model.gd
+@@ -106,19 +106,39 @@
+ func _update_automatic_request(engine_rpm: float, throttle: float, vehicle_speed_mps: float) -> void:
+ 	if current_gear <= 0:
+ 		return
++	var speed_abs: float = abs(vehicle_speed_mps)
+ 	var upshift_rpm: float = lerp(config.automatic_shift_up_rpm * 0.82, config.automatic_shift_up_rpm, throttle)
+ 	var downshift_rpm: float = lerp(config.automatic_shift_down_rpm * 1.25, config.automatic_shift_down_rpm, throttle)
+-	if engine_rpm >= upshift_rpm and current_gear < maximum_forward_gear():
++	var minimum_upshift_speed: float = _minimum_upshift_speed_mps(current_gear, upshift_rpm)
++	# During launch, clutch slip or rear-wheel spin can raise engine RPM while
++	# road speed remains near zero. RPM alone must never walk the gearbox from
++	# first to sixth while the car is stationary.
++	var upshift_allowed: bool = speed_abs >= minimum_upshift_speed
++	if engine_rpm >= upshift_rpm and upshift_allowed and current_gear < maximum_forward_gear():
+ 		requested_gear = current_gear + 1
+-	elif engine_rpm <= downshift_rpm and current_gear > 1:
++	elif (engine_rpm <= downshift_rpm or speed_abs < _minimum_hold_speed_mps(current_gear)) and current_gear > 1:
+ 		requested_gear = current_gear - 1
+-	elif throttle >= config.automatic_kickdown_throttle and current_gear > 1 and vehicle_speed_mps > 5.0:
++	elif throttle >= config.automatic_kickdown_throttle and current_gear > 1 and speed_abs > 5.0:
+ 		var lower_ratio: float = abs(ratio_for_gear(current_gear - 1))
+ 		var current_ratio_abs: float = max(abs(current_ratio()), 0.001)
+ 		var predicted_rpm: float = engine_rpm * lower_ratio / current_ratio_abs
+ 		if predicted_rpm < config.engine_redline_rpm * 0.93:
+ 			requested_gear = current_gear - 1
+ 
++func _minimum_upshift_speed_mps(gear: int, target_rpm: float) -> float:
++	var total_ratio: float = abs(ratio_for_gear(gear)) * max(config.final_drive_ratio, 0.001)
++	var radius: float = 0.5 * (config.rear_wheel_radius + config.front_wheel_radius)
++	var theoretical_speed: float = target_rpm * TAU / 60.0 * radius / max(total_ratio, 0.001)
++	return max(theoretical_speed * 0.43, 2.8 + float(max(gear - 1, 0)) * 1.8)
++
++func _minimum_hold_speed_mps(gear: int) -> float:
++	if gear <= 1:
++		return 0.0
++	var lower_total_ratio: float = abs(ratio_for_gear(gear - 1)) * max(config.final_drive_ratio, 0.001)
++	var radius: float = 0.5 * (config.rear_wheel_radius + config.front_wheel_radius)
++	var theoretical_speed: float = config.automatic_shift_down_rpm * TAU / 60.0 * radius / max(lower_total_ratio, 0.001)
++	return max(theoretical_speed * 0.52, 1.8 + float(gear - 2) * 1.35)
++
+ func _begin_shift(target_gear: int) -> void:
+ 	requested_gear = clamp(target_gear, -1, maximum_forward_gear())
+ 	last_shift_direction = int(sign(requested_gear - current_gear))
+@@ -141,7 +161,7 @@
+ 		shift_progress = 1.0
+ 		torque_cut = 0.0
+ 		current_gear = requested_gear
+-		shift_cooldown = 0.14
++		shift_cooldown = 0.32
+ 
+ func _shift_connection_curve(progress: float) -> float:
+ 	var p: float = clamp(progress, 0.0, 1.0)
+--- dxn_car_sandbox_v5/tests/physics_unit_tests.gd
++++ dxn_car_sandbox_v5/tests/physics_unit_tests.gd
+@@ -1,6 +1,6 @@
+ extends SceneTree
+ 
+-const EXPECTED_TEST_COUNT: int = 49
++const EXPECTED_TEST_COUNT: int = 53
+ 
+ var failures: PackedStringArray = PackedStringArray()
+ var passed: int = 0
+@@ -25,6 +25,7 @@
+ 	_test_gearbox(config)
+ 	_test_differential(config)
+ 	_test_powertrain_rwd(config)
++	_test_gearbox_launch_gate(config)
+ 	_test_rigid_body_impulse(config)
+ 	_test_quaternion_integrator(config)
+ 	_test_input_router()
+@@ -71,9 +72,9 @@
+ 	var damper: DXNDamperModel = DXNDamperModel.new()
+ 	damper.configure(config)
+ 	test_wheel.suspension_velocity = 0.20
+-	_check(damper.calculate_force(test_wheel) < 0.0, "bump damper opposes compression velocity")
++	_check(damper.calculate_force(test_wheel) > 0.0, "bump damper adds support during compression")
+ 	test_wheel.suspension_velocity = -0.20
+-	_check(damper.calculate_force(test_wheel) > 0.0, "rebound damper opposes extension velocity")
++	_check(damper.calculate_force(test_wheel) < 0.0, "rebound damper removes support during extension")
+ 
+ func _test_tyre_forces(config: DXNVehicleConfig) -> void:
+ 	var tyre: DXNTyreModel = DXNTyreModel.new()
+@@ -154,6 +155,18 @@
+ 	_check(powertrain.engine.rpm > config.engine_stall_rpm, "automatic launch maintains RPM above stall")
+ 	_check(peak_clutch_engagement > 0.05, "automatic clutch engages progressively after launch")
+ 
++func _test_gearbox_launch_gate(config: DXNVehicleConfig) -> void:
++	var gearbox: DXNGearboxModel = DXNGearboxModel.new()
++	gearbox.configure(config)
++	for _index in range(900):
++		gearbox.step(config.automatic_shift_up_rpm + 500.0, 1.0, 0.4, false, false, 1.0 / 600.0)
++	_check(gearbox.current_gear == 1, "automatic gearbox stays in first during stationary wheelspin")
++	for _index in range(900):
++		gearbox.step(config.automatic_shift_up_rpm + 500.0, 0.8, 12.0, false, false, 1.0 / 600.0)
++	_check(gearbox.current_gear >= 2, "automatic gearbox can upshift at plausible road speed")
++	_check(gearbox._minimum_upshift_speed_mps(2, config.automatic_shift_up_rpm) > gearbox._minimum_upshift_speed_mps(1, config.automatic_shift_up_rpm), "higher gears require greater road speed")
++	_check(gearbox._minimum_hold_speed_mps(3) > gearbox._minimum_hold_speed_mps(2), "gear hold speed rises with gear")
++
+ func _test_rigid_body_impulse(config: DXNVehicleConfig) -> void:
+ 	var state: DXNRigidBodyState = DXNRigidBodyState.new()
+ 	state.configure(config.mass, config.inertia_diagonal())
