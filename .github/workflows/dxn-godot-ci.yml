@@ -45,8 +45,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 --decode dxn_ci/overrides/tests_v08.tar.xz.b64 > /tmp/tests_v08.tar.xz
-          tar -xJf /tmp/tests_v08.tar.xz
+          base64 --decode dxn_ci/overrides/tests_v09.tar.xz.b64 > /tmp/tests_v09.tar.xz
+          tar -xJf /tmp/tests_v09.tar.xz
           test -f dxn_car_sandbox_v5/tests/vehicle_integration_tests.gd
 
       - name: Install Godot 4.7.1 stable
