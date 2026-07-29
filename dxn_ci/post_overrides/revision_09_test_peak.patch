@@ -20,4 +20,4 @@
 -	_check(powertrain.clutch.engagement > 0.05, "automatic clutch engages progressively after launch")
 +	_check(peak_clutch_engagement > 0.05, "automatic clutch engages progressively after launch")
  
- func _test_rigid_body_impulse(config: DXNRigidBodyState) -> void:
+ func _test_rigid_body_impulse(config: DXNVehicleConfig) -> void:
