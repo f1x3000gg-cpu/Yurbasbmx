@@ -76,6 +76,56 @@ jobs:
            		for failure in failures:
           PATCH
 
+      - name: Apply revision 03 physics test API fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch -p1 <<'PATCH'
+          --- a/dxn_car_sandbox_v5/tests/physics_unit_tests.gd
+          +++ b/dxn_car_sandbox_v5/tests/physics_unit_tests.gd
+          @@ -57,11 +57,19 @@
+           	_check(rear_frequency > 1.2 and rear_frequency < 2.5, "rear natural frequency plausible")
+           	var spring: DXNSpringModel = DXNSpringModel.new()
+           	spring.configure(config)
+          -	_check(spring.calculate_force(0, 0.16) > spring.calculate_force(0, 0.08) * 2.0, "progressive spring increases faster than linear")
+          +	var test_wheel: DXNWheelRuntime = DXNWheelRuntime.new()
+          +	test_wheel.configure(0, "FL_TEST", config.wheel_hardpoint_local(0), true, true, false, config.front_rest_length)
+          +	test_wheel.suspension_length = config.front_rest_length - 0.08
+          +	var shallow_force: float = float(spring.calculate_force(test_wheel)["total_force"])
+          +	test_wheel.suspension_length = config.front_rest_length - 0.16
+          +	var deep_force: float = float(spring.calculate_force(test_wheel)["total_force"])
+          +	_check(deep_force > shallow_force * 2.0, "progressive spring increases faster than linear")
+           	var damper: DXNDamperModel = DXNDamperModel.new()
+           	damper.configure(config)
+          -	_check(damper.calculate_force(0, 0.20) > 0.0, "bump damper resists compression")
+          -	_check(damper.calculate_force(0, -0.20) < 0.0, "rebound damper resists extension")
+          +	test_wheel.suspension_velocity = 0.20
+          +	_check(damper.calculate_force(test_wheel) < 0.0, "bump damper opposes compression velocity")
+          +	test_wheel.suspension_velocity = -0.20
+          +	_check(damper.calculate_force(test_wheel) > 0.0, "rebound damper opposes extension velocity")
+           
+           func _test_tyre_forces(config: DXNVehicleConfig) -> void:
+           	var tyre: DXNTyreModel = DXNTyreModel.new()
+          @@ -140,7 +148,7 @@
+           	state.reset(Transform3D.IDENTITY)
+           	state.angular_velocity = Vector3(0.0, 1.0, 0.0)
+           	var integrator: DXNRigidBodyIntegrator = DXNRigidBodyIntegrator.new()
+          -	integrator.configure(Vector3.ZERO, 0.0, 0.0, 200.0, 20.0)
+          +	integrator.configure(Vector3.ZERO, 0.0, Vector3.ZERO, 200.0, 20.0)
+           	for _index in range(600):
+           		state.begin_step()
+           		integrator.integrate(state, 1.0 / 600.0)
+          @@ -173,7 +181,7 @@
+           	state.linear_velocity = Vector3(5000.0, -4000.0, 8000.0)
+           	state.angular_velocity = Vector3(400.0, 300.0, -500.0)
+           	var integrator: DXNRigidBodyIntegrator = DXNRigidBodyIntegrator.new()
+          -	integrator.configure(Vector3.ZERO, 0.0, 0.0, 95.0, 13.0)
+          +	integrator.configure(Vector3.ZERO, 0.0, Vector3.ZERO, 95.0, 13.0)
+           	state.begin_step()
+           	integrator.integrate(state, 1.0 / 120.0)
+           	_check(state.linear_velocity.length() <= 95.01, "linear velocity safety cap")
+          PATCH
+
       - name: Install Godot 4.7.1 stable
         shell: bash
         run: |
