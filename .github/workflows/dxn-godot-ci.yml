@@ -109,7 +109,7 @@ jobs:
             exit 1
           fi
           grep -F 'DXN_PARSE_ALL_PASS' /tmp/dxn-parse.log
-          grep -F 'DXN_PHYSICS_TESTS passed=49 total=49 failures=0' /tmp/dxn-physics.log
+          grep -F 'DXN_PHYSICS_TESTS passed=53 total=53 failures=0' /tmp/dxn-physics.log
           grep -F 'DXN_RUNTIME_SMOKE_PASS' /tmp/dxn-runtime.log
           grep -F 'DXN_VEHICLE_INTEGRATION_PASS' /tmp/dxn-integration.log
 
