@@ -11,7 +11,7 @@ permissions:
 jobs:
   godot-runtime-validation:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout validation branch
         uses: actions/checkout@v4
@@ -60,25 +60,49 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          timeout 180 "$GODOT" --headless --path dxn_car_sandbox_v5 --editor --quit
+          timeout 180 "$GODOT" --headless --path dxn_car_sandbox_v5 --editor --quit 2>&1 | tee /tmp/dxn-import.log
 
-      - name: Load every GDScript
+      - name: Load every GDScript recursively
         shell: bash
         run: |
           set -euo pipefail
-          timeout 180 "$GODOT" --headless --path dxn_car_sandbox_v5 --script res://tests/parse_all.gd
+          timeout 180 "$GODOT" --headless --path dxn_car_sandbox_v5 --script res://tests/parse_all.gd 2>&1 | tee /tmp/dxn-parse.log
 
       - name: Run vehicle physics unit tests
         shell: bash
         run: |
           set -euo pipefail
-          timeout 180 "$GODOT" --headless --path dxn_car_sandbox_v5 --script res://tests/physics_unit_tests.gd
+          timeout 180 "$GODOT" --headless --path dxn_car_sandbox_v5 --script res://tests/physics_unit_tests.gd 2>&1 | tee /tmp/dxn-physics.log
 
-      - name: Run main-scene runtime smoke test
+      - name: Run strict main-scene drive and brake test
         shell: bash
         run: |
           set -euo pipefail
-          timeout 180 "$GODOT" --headless --path dxn_car_sandbox_v5 --script res://tests/runtime_smoke.gd
+          timeout 180 "$GODOT" --headless --path dxn_car_sandbox_v5 --script res://tests/runtime_smoke.gd 2>&1 | tee /tmp/dxn-runtime.log
+
+      - name: Run curb and suspension integration test
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 180 "$GODOT" --headless --path dxn_car_sandbox_v5 --script res://tests/vehicle_integration_tests.gd 2>&1 | tee /tmp/dxn-integration.log
+
+      - name: Reject hidden Godot diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat /tmp/dxn-import.log /tmp/dxn-parse.log /tmp/dxn-physics.log /tmp/dxn-runtime.log /tmp/dxn-integration.log > /tmp/dxn-combined.log
+          if grep -E 'SCRIPT ERROR:|DXN_PARSE_ALL_FAIL|DXN_RUNTIME_SMOKE_FAIL|DXN_VEHICLE_INTEGRATION_FAIL|FAIL:' /tmp/dxn-combined.log; then
+            echo "DXN strict diagnostics found a failure"
+            exit 1
+          fi
+          if grep -E '^ERROR:' /tmp/dxn-combined.log | grep -v 'resources still in use at exit' | grep -v 'RID allocations'; then
+            echo "DXN strict diagnostics found a non-cleanup Godot error"
+            exit 1
+          fi
+          grep -F 'DXN_PARSE_ALL_PASS' /tmp/dxn-parse.log
+          grep -F 'DXN_PHYSICS_TESTS passed=42 total=42 failures=0' /tmp/dxn-physics.log
+          grep -F 'DXN_RUNTIME_SMOKE_PASS' /tmp/dxn-runtime.log
+          grep -F 'DXN_VEHICLE_INTEGRATION_PASS' /tmp/dxn-integration.log
 
       - name: Package validated project
         if: success()
@@ -95,4 +119,13 @@ jobs:
           name: DXN-CAR-SANDBOX-v5-GODOT-VALIDATED
           path: DXN_CAR_SANDBOX_v5_GODOT_VALIDATED.zip
           if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DXN-CAR-SANDBOX-v5-VALIDATION-LOGS
+          path: /tmp/dxn-*.log
+          if-no-files-found: ignore
           retention-days: 30
