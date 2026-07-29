@@ -1,0 +1,69 @@
+--- dxn_car_sandbox_v5/scripts/vehicle/vehicle_config.gd
++++ dxn_car_sandbox_v5/scripts/vehicle/vehicle_config.gd
+@@ -113,8 +113,9 @@
+ var throttle_plate_rate_open: float = 7.5
+ var throttle_plate_rate_close: float = 10.5
+ var throttle_filter_hz: float = 8.0
+-var idle_controller_gain: float = 0.0045
+-var idle_controller_max: float = 0.24
++var idle_controller_feedforward: float = 0.275
++var idle_controller_gain: float = 0.00125
++var idle_controller_max: float = 0.43
+ var limiter_cut_time: float = 0.055
+ var engine_torque_points: PackedVector2Array = PackedVector2Array([
+ 	Vector2(700.0, 128.0),
+--- dxn_car_sandbox_v5/scripts/vehicle/powertrain/engine_model.gd
++++ dxn_car_sandbox_v5/scripts/vehicle/powertrain/engine_model.gd
+@@ -122,9 +122,15 @@
+ 	if not running or limiter_active:
+ 		idle_controller = 0.0
+ 		return
++	# Feed-forward air compensates the known Coulomb/viscous engine drag at
++	# idle. The proportional term then corrects only the RPM error instead of
++	# waiting for the crankshaft to lose hundreds of RPM before adding torque.
+ 	var rpm_error: float = config.engine_idle_rpm - rpm
+-	var target: float = clamp(rpm_error * config.idle_controller_gain, 0.0, config.idle_controller_max)
+-	idle_controller = DXNMath.exp_smooth_float(idle_controller, target, 4.0, delta)
++	var target: float = config.idle_controller_feedforward + rpm_error * config.idle_controller_gain
++	if throttle_command > target:
++		target = 0.0
++	target = clamp(target, 0.0, config.idle_controller_max)
++	idle_controller = DXNMath.exp_smooth_float(idle_controller, target, 8.0, delta)
+ 
+ func _update_combustion(delta: float) -> void:
+ 	if not running or stalled or limiter_active:
+@@ -155,9 +161,12 @@
+ 	var angular_acceleration: float = net_torque / max(config.engine_inertia, 0.001)
+ 	angular_velocity = max(angular_velocity + angular_acceleration * delta, 0.0)
+ 	rpm = angular_velocity_to_rpm(angular_velocity)
+-	if running and rpm < config.engine_stall_rpm and throttle_plate < 0.25 and abs(load_torque) > 35.0:
+-		stalled = true
+-		running = false
++	if running and rpm < config.engine_stall_rpm:
++		var loaded_stall: bool = throttle_plate < 0.25 and abs(load_torque) > 35.0
++		var crankshaft_stopped: bool = rpm < max(config.engine_stall_rpm * 0.12, 55.0)
++		if loaded_stall or crankshaft_stopped:
++			stalled = true
++			running = false
+ 	if not running:
+ 		angular_velocity = max(angular_velocity - 7.0 * delta, 0.0)
+ 		rpm = angular_velocity_to_rpm(angular_velocity)
+--- dxn_car_sandbox_v5/scripts/vehicle/powertrain/powertrain_system.gd
++++ dxn_car_sandbox_v5/scripts/vehicle/powertrain/powertrain_system.gd
+@@ -112,11 +112,15 @@
+ 	gearbox.request_gear(gear)
+ 
+ func _handle_automatic_restart(input_state) -> void:
+-	if not engine.stalled:
++	var crankshaft_stopped: bool = engine.rpm < max(config.engine_stall_rpm * 0.12, 55.0)
++	if not engine.stalled and not crankshaft_stopped:
+ 		return
+ 	automatic_clutch_command = 0.0
+ 	clutch_command = 0.0
+ 	if input_state.throttle > 0.035:
++		if crankshaft_stopped and not engine.stalled:
++			engine.stalled = true
++			engine.running = false
+ 		engine.restart()
+ 		starter_hold_timer = 0.42
+ 		restart_count += 1
