@@ -1,0 +1,23 @@
+--- dxn_car_sandbox_v5/tests/physics_unit_tests.gd
++++ dxn_car_sandbox_v5/tests/physics_unit_tests.gd
+@@ -138,10 +138,12 @@
+ 	input_state.throttle = 1.0
+ 	var accumulated: Vector2 = Vector2.ZERO
+ 	var peak_drive_torque: float = 0.0
++	var peak_clutch_engagement: float = 0.0
+ 	var wheel_inertia: float = config.wheel_inertia(2)
+ 	for _index in range(1200):
+ 		accumulated = powertrain.step(input_state, rear_left, rear_right, 0.0, 1.0 / 600.0)
+ 		peak_drive_torque = max(peak_drive_torque, accumulated.x, accumulated.y)
++		peak_clutch_engagement = max(peak_clutch_engagement, powertrain.clutch.engagement)
+ 		rear_left.angular_velocity += accumulated.x / max(wheel_inertia, 0.01) * (1.0 / 600.0)
+ 		rear_right.angular_velocity += accumulated.y / max(wheel_inertia, 0.01) * (1.0 / 600.0)
+ 	_check(peak_drive_torque > 50.0, "RWD produces rear axle drive torque")
+@@ -150,7 +152,7 @@
+ 	_check(powertrain.gearbox.current_gear >= 1, "automatic powertrain engages forward gear")
+ 	_check(powertrain.engine.running and not powertrain.engine.stalled, "automatic launch keeps engine running")
+ 	_check(powertrain.engine.rpm > config.engine_stall_rpm, "automatic launch maintains RPM above stall")
+-	_check(powertrain.clutch.engagement > 0.05, "automatic clutch engages progressively after launch")
++	_check(peak_clutch_engagement > 0.05, "automatic clutch engages progressively after launch")
+ 
+ func _test_rigid_body_impulse(config: DXNRigidBodyState) -> void:
