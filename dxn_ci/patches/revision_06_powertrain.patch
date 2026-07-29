@@ -1,0 +1,287 @@
+--- dxn_car_sandbox_v5/scripts/vehicle/powertrain/engine_model.gd
++++ dxn_car_sandbox_v5/scripts/vehicle/powertrain/engine_model.gd
+@@ -66,11 +66,16 @@
+ 	rpm = angular_velocity_to_rpm(angular_velocity)
+ 
+ func restart() -> void:
+-	if not stalled:
++	if running and not stalled:
+ 		return
+ 	stalled = false
+ 	running = true
+-	angular_velocity = max(angular_velocity, rpm_to_angular_velocity(config.engine_idle_rpm * 0.8))
++	limiter_timer = 0.0
++	limiter_active = false
++	angular_velocity = max(angular_velocity, rpm_to_angular_velocity(config.engine_idle_rpm * 0.94))
++	rpm = angular_velocity_to_rpm(angular_velocity)
++	idle_controller = max(idle_controller, config.idle_controller_max * 0.72)
++	manifold_fill = max(manifold_fill, 0.08)
+ 
+ func stop() -> void:
+ 	running = false
+--- dxn_car_sandbox_v5/scripts/vehicle/powertrain/clutch_model.gd
++++ dxn_car_sandbox_v5/scripts/vehicle/powertrain/clutch_model.gd
+@@ -2,8 +2,8 @@
+ class_name DXNClutchModel
+ 
+ var config: DXNVehicleConfig
+-var engagement: float = 1.0
+-var command: float = 1.0
++var engagement: float = 0.0
++var command: float = 0.0
+ var transmitted_torque: float = 0.0
+ var slip_angular_velocity: float = 0.0
+ var temperature_c: float = 25.0
+@@ -16,8 +16,10 @@
+ 	reset()
+ 
+ func reset() -> void:
+-	engagement = 1.0
+-	command = 1.0
++	# Spawn with the clutch open. Closing a fully engaged clutch against a
++	# stationary first gear applies an artificial impulse and stalls the engine.
++	engagement = 0.0
++	command = 0.0
+ 	transmitted_torque = 0.0
+ 	slip_angular_velocity = 0.0
+ 	temperature_c = 25.0
+@@ -38,6 +40,11 @@
+ 	slip_angular_velocity = engine_omega - gearbox_input_omega
+ 	_update_fade()
+ 	var capacity: float = config.clutch_capacity_nm * engagement * fade_factor
++	if capacity <= 0.001:
++		transmitted_torque = 0.0
++		locked = false
++		_update_temperature(delta)
++		return transmitted_torque
+ 	var spring_torque: float = slip_angular_velocity * config.clutch_stiffness
+ 	var damping_torque: float = sign(slip_angular_velocity) * min(abs(slip_angular_velocity) * config.clutch_damping, capacity * 0.25)
+ 	var target_torque: float = spring_torque + damping_torque
+@@ -66,6 +73,7 @@
+ func snapshot() -> Dictionary:
+ 	return {
+ 		"engagement": engagement,
++		"command": command,
+ 		"transmitted_torque": transmitted_torque,
+ 		"slip_angular_velocity": slip_angular_velocity,
+ 		"temperature_c": temperature_c,
+--- dxn_car_sandbox_v5/scripts/vehicle/powertrain/powertrain_system.gd
++++ dxn_car_sandbox_v5/scripts/vehicle/powertrain/powertrain_system.gd
+@@ -14,10 +14,13 @@
+ var final_drive_torque: float = 0.0
+ var left_drive_torque: float = 0.0
+ var right_drive_torque: float = 0.0
+-var clutch_command: float = 1.0
+-var automatic_clutch_command: float = 1.0
++var clutch_command: float = 0.0
++var automatic_clutch_command: float = 0.0
+ var driveline_windup: float = 0.0
+ var last_engine_load_torque: float = 0.0
++var starter_hold_timer: float = 0.0
++var anti_stall_active: bool = false
++var restart_count: int = 0
+ 
+ func configure(source_config: DXNVehicleConfig) -> void:
+ 	config = source_config
+@@ -39,12 +42,20 @@
+ 	final_drive_torque = 0.0
+ 	left_drive_torque = 0.0
+ 	right_drive_torque = 0.0
+-	clutch_command = 1.0
+-	automatic_clutch_command = 1.0
++	clutch_command = 0.0
++	automatic_clutch_command = 0.0
+ 	driveline_windup = 0.0
+ 	last_engine_load_torque = 0.0
++	starter_hold_timer = 0.32
++	anti_stall_active = false
++	restart_count = 0
+ 
+ func step(input_state, rear_left: DXNWheelRuntime, rear_right: DXNWheelRuntime, vehicle_speed_mps: float, delta: float) -> Vector2:
++	if config == null or delta <= 0.0:
++		return Vector2.ZERO
++	starter_hold_timer = max(starter_hold_timer - delta, 0.0)
++	_handle_automatic_restart(input_state)
++
+ 	gearbox.step(
+ 		engine.rpm,
+ 		input_state.throttle,
+@@ -71,6 +82,14 @@
+ 	last_engine_load_torque = clutch_torque
+ 	engine.step(input_state.throttle, clutch_torque, delta)
+ 
++	# A sudden RPM collapse must open the clutch before the following frame can
++	# feed the stalled crankshaft back into the axle model.
++	if engine.rpm < config.engine_stall_rpm * 1.08 and gearbox.current_gear != 0:
++		anti_stall_active = true
++		automatic_clutch_command = min(automatic_clutch_command, 0.04)
++	else:
++		anti_stall_active = false
++
+ 	prop_shaft_torque = gearbox.calculate_output_torque(clutch_torque)
+ 	prop_shaft_omega = gearbox.output_angular_velocity
+ 	final_drive_torque = prop_shaft_torque * config.final_drive_ratio * config.gearbox_efficiency
+@@ -92,19 +111,39 @@
+ func request_gear(gear: int) -> void:
+ 	gearbox.request_gear(gear)
+ 
++func _handle_automatic_restart(input_state) -> void:
++	if not engine.stalled:
++		return
++	automatic_clutch_command = 0.0
++	clutch_command = 0.0
++	if input_state.throttle > 0.035:
++		engine.restart()
++		starter_hold_timer = 0.42
++		restart_count += 1
++
+ func _update_automatic_clutch(input_state, vehicle_speed_mps: float, delta: float) -> void:
++	var speed_abs: float = abs(vehicle_speed_mps)
+ 	var target: float = 1.0
+ 	if gearbox.shifting or gearbox.current_gear == 0:
+ 		target = 0.0
+-	elif engine.stalled:
++	elif engine.stalled or not engine.running or starter_hold_timer > 0.0:
+ 		target = 0.0
+-	elif gearbox.current_gear != 0 and vehicle_speed_mps < 4.0:
+-		var launch_rpm_factor: float = DXNMath.smooth_step(config.engine_idle_rpm, 1900.0, engine.rpm)
+-		var speed_factor: float = DXNMath.smooth_step(0.2, 4.0, vehicle_speed_mps)
+-		var throttle_factor: float = DXNMath.smooth_step(0.03, 0.55, input_state.throttle)
+-		target = clamp(max(speed_factor, launch_rpm_factor * throttle_factor), 0.16, 1.0)
+-	var rate: float = 7.0 if target > automatic_clutch_command else 14.0
+-	automatic_clutch_command = move_toward(automatic_clutch_command, target, rate * delta)
++	elif gearbox.current_gear != 0 and speed_abs < 6.5:
++		var throttle_request: float = DXNMath.smooth_step(0.02, 0.68, input_state.throttle)
++		var rpm_guard: float = DXNMath.smooth_step(config.engine_stall_rpm * 1.08, config.engine_idle_rpm * 0.92, engine.rpm)
++		var rpm_connection: float = DXNMath.smooth_step(config.engine_idle_rpm * 1.03, 2050.0, engine.rpm)
++		var speed_connection: float = DXNMath.smooth_step(0.35, 6.5, speed_abs)
++		var launch_ceiling: float = lerp(0.12, 0.58, throttle_request)
++		var launch_connection: float = rpm_connection * launch_ceiling
++		target = max(speed_connection, launch_connection) * rpm_guard
++		if input_state.throttle < 0.015 and speed_abs < 0.4:
++			target = 0.0
++	if engine.rpm < config.engine_idle_rpm * 0.78 and gearbox.current_gear != 0:
++		var emergency_guard: float = DXNMath.smooth_step(config.engine_stall_rpm, config.engine_idle_rpm * 0.82, engine.rpm)
++		target = min(target, emergency_guard * 0.10)
++	var close_rate: float = 3.25 if speed_abs < 3.5 else 5.8
++	var rate: float = close_rate if target > automatic_clutch_command else 18.0
++	automatic_clutch_command = move_toward(automatic_clutch_command, clamp(target, 0.0, 1.0), rate * delta)
+ 
+ func snapshot() -> Dictionary:
+ 	return {
+@@ -116,5 +155,8 @@
+ 		"final_drive_torque": final_drive_torque,
+ 		"left_drive_torque": left_drive_torque,
+ 		"right_drive_torque": right_drive_torque,
+-		"automatic_clutch_command": automatic_clutch_command
++		"automatic_clutch_command": automatic_clutch_command,
++		"starter_hold_timer": starter_hold_timer,
++		"anti_stall_active": anti_stall_active,
++		"restart_count": restart_count
+ 	}
+--- dxn_car_sandbox_v5/scripts/vehicle/powertrain/differential_model.gd
++++ dxn_car_sandbox_v5/scripts/vehicle/powertrain/differential_model.gd
+@@ -6,6 +6,7 @@
+ var left_output_torque: float = 0.0
+ var right_output_torque: float = 0.0
+ var locking_torque: float = 0.0
++var compliance_redistribution_torque: float = 0.0
+ var speed_difference: float = 0.0
+ var torque_bias_ratio: float = 1.0
+ var power_side: bool = true
+@@ -23,6 +24,7 @@
+ 	left_output_torque = 0.0
+ 	right_output_torque = 0.0
+ 	locking_torque = 0.0
++	compliance_redistribution_torque = 0.0
+ 	speed_difference = 0.0
+ 	torque_bias_ratio = 1.0
+ 	power_side = true
+@@ -42,11 +44,25 @@
+ 	carrier_angular_velocity = 0.5 * (left_wheel_omega + right_wheel_omega)
+ 	speed_difference = left_wheel_omega - right_wheel_omega
+ 	power_side = input_torque >= 0.0
++
++	# An unloaded differential cannot manufacture energy by winding one axle
++	# against the other. Stored twist is dissipated internally, never emitted as
++	# equal-and-opposite wheel drive torque.
++	if abs(input_torque) <= 0.05:
++		_relax_axles(delta)
++		locking_torque = 0.0
++		compliance_redistribution_torque = 0.0
++		left_output_torque = 0.0
++		right_output_torque = 0.0
++		torque_bias_ratio = 1.0
++		return Vector2.ZERO
++
+ 	var lock_fraction: float = config.differential_power_lock if power_side else config.differential_coast_lock
+-	var preload_torque: float = config.differential_preload_nm
++	var preload_torque: float = min(config.differential_preload_nm, abs(input_torque) * 0.22)
+ 	var viscous_lock: float = speed_difference * 9.5
+ 	var ramp_lock: float = abs(input_torque) * lock_fraction * DXNMath.soft_sign(speed_difference, 0.75)
+-	locking_torque = clamp(preload_torque * DXNMath.soft_sign(speed_difference, 0.4) + viscous_lock + ramp_lock, -abs(input_torque) * 0.48 - preload_torque, abs(input_torque) * 0.48 + preload_torque)
++	var lock_limit: float = abs(input_torque) * 0.46
++	locking_torque = clamp(preload_torque * DXNMath.soft_sign(speed_difference, 0.4) + viscous_lock + ramp_lock, -lock_limit, lock_limit)
+ 
+ 	var base_torque: float = input_torque * 0.5
+ 	var reaction_difference: float = left_reaction_torque - right_reaction_torque
+@@ -54,10 +70,19 @@
+ 	var target_left: float = base_torque - locking_torque - reaction_compensation
+ 	var target_right: float = base_torque + locking_torque + reaction_compensation
+ 	var biased: Vector2 = _apply_torque_bias_limit(target_left, target_right, input_torque)
+-	_update_axle_compliance(biased.x, biased.y, left_wheel_omega, right_wheel_omega, delta)
+-	left_output_torque = biased.x + _axle_torque(left_axle_twist, left_axle_twist_velocity)
+-	right_output_torque = biased.y + _axle_torque(right_axle_twist, right_axle_twist_velocity)
+-	return Vector2(left_output_torque, right_output_torque)
++
++	_update_axle_compliance(left_wheel_omega, right_wheel_omega, delta)
++	var left_shaft_torque: float = _axle_torque(left_axle_twist, left_axle_twist_velocity)
++	var right_shaft_torque: float = _axle_torque(right_axle_twist, right_axle_twist_velocity)
++	var raw_redistribution: float = 0.5 * (left_shaft_torque - right_shaft_torque)
++	var redistribution_limit: float = abs(input_torque) * 0.20
++	compliance_redistribution_torque = clamp(raw_redistribution, -redistribution_limit, redistribution_limit)
++	var compliant_left: float = biased.x + compliance_redistribution_torque
++	var compliant_right: float = biased.y - compliance_redistribution_torque
++	var final_split: Vector2 = _apply_torque_bias_limit(compliant_left, compliant_right, input_torque)
++	left_output_torque = final_split.x
++	right_output_torque = final_split.y
++	return final_split
+ 
+ func _apply_torque_bias_limit(left: float, right: float, total_input: float) -> Vector2:
+ 	var requested_total: float = total_input
+@@ -90,17 +115,18 @@
+ 		torque_bias_ratio = config.differential_max_bias_ratio
+ 	return Vector2(left_in_direction * drive_sign, right_in_direction * drive_sign)
+ 
+-func _update_axle_compliance(left_torque: float, right_torque: float, left_omega: float, right_omega: float, delta: float) -> void:
+-	var carrier_left_speed: float = carrier_angular_velocity
+-	var carrier_right_speed: float = carrier_angular_velocity
+-	left_axle_twist_velocity = carrier_left_speed - left_omega
+-	right_axle_twist_velocity = carrier_right_speed - right_omega
++func _update_axle_compliance(left_omega: float, right_omega: float, delta: float) -> void:
++	left_axle_twist_velocity = carrier_angular_velocity - left_omega
++	right_axle_twist_velocity = carrier_angular_velocity - right_omega
+ 	left_axle_twist = clamp(left_axle_twist + left_axle_twist_velocity * delta, -config.axle_shaft_max_twist, config.axle_shaft_max_twist)
+ 	right_axle_twist = clamp(right_axle_twist + right_axle_twist_velocity * delta, -config.axle_shaft_max_twist, config.axle_shaft_max_twist)
+-	if abs(left_torque) < 1.0:
+-		left_axle_twist = move_toward(left_axle_twist, 0.0, delta * 0.5)
+-	if abs(right_torque) < 1.0:
+-		right_axle_twist = move_toward(right_axle_twist, 0.0, delta * 0.5)
++
++func _relax_axles(delta: float) -> void:
++	left_axle_twist_velocity = 0.0
++	right_axle_twist_velocity = 0.0
++	var relaxation_rate: float = config.axle_shaft_max_twist * 7.5
++	left_axle_twist = move_toward(left_axle_twist, 0.0, relaxation_rate * delta)
++	right_axle_twist = move_toward(right_axle_twist, 0.0, relaxation_rate * delta)
+ 
+ func _axle_torque(twist: float, twist_velocity: float) -> float:
+ 	return twist * config.axle_shaft_stiffness + twist_velocity * config.axle_shaft_damping
+@@ -110,6 +136,7 @@
+ 		"carrier_omega": carrier_angular_velocity,
+ 		"speed_difference": speed_difference,
+ 		"locking_torque": locking_torque,
++		"compliance_redistribution_torque": compliance_redistribution_torque,
+ 		"left_torque": left_output_torque,
+ 		"right_torque": right_output_torque,
+ 		"bias_ratio": torque_bias_ratio,

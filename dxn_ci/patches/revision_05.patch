@@ -1,0 +1,35 @@
+--- dxn_car_sandbox_v5/tests/physics_unit_tests.gd
++++ dxn_car_sandbox_v5/tests/physics_unit_tests.gd
+@@ -1,11 +1,15 @@
+ extends SceneTree
+ 
++const EXPECTED_TEST_COUNT: int = 42
++
+ var failures: PackedStringArray = PackedStringArray()
+ var passed: int = 0
+ var total: int = 0
+ 
+ func _initialize() -> void:
+ 	_run_tests()
++	if total != EXPECTED_TEST_COUNT:
++		failures.append("FAIL: test suite executed %d checks instead of %d" % [total, EXPECTED_TEST_COUNT])
+ 	print("DXN_PHYSICS_TESTS passed=", passed, " total=", total, " failures=", failures.size())
+ 	for failure in failures:
+ 		push_error(failure)
+@@ -130,7 +134,7 @@
+ 	input_state.throttle = 1.0
+ 	var accumulated: Vector2 = Vector2.ZERO
+ 	var peak_drive_torque: float = 0.0
+-	var wheel_inertia: float = config.rear_wheel_inertia
++	var wheel_inertia: float = config.wheel_inertia(2)
+ 	for _index in range(1200):
+ 		accumulated = powertrain.step(input_state, rear_left, rear_right, 0.0, 1.0 / 600.0)
+ 		peak_drive_torque = max(peak_drive_torque, accumulated.x, accumulated.y)
+@@ -180,6 +184,7 @@
+ 	surface.configure_from_collider(collider)
+ 	_check(surface.name == "TEST WET", "surface metadata name")
+ 	_check(surface.effective_mu_lateral(35.0, 220.0, 0.275) < surface.mu_lateral, "water reduces high-speed lateral grip")
++	collider.free()
+ 
+ func _test_energy_guard(config: DXNVehicleConfig) -> void:
+ 	var state: DXNRigidBodyState = DXNRigidBodyState.new()

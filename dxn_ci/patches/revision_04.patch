@@ -1,0 +1,97 @@
+--- dxn_car_sandbox_v5/scripts/vehicle/powertrain/differential_model.gd
++++ dxn_car_sandbox_v5/scripts/vehicle/powertrain/differential_model.gd
+@@ -60,21 +60,35 @@
+ 	return Vector2(left_output_torque, right_output_torque)
+ 
+ func _apply_torque_bias_limit(left: float, right: float, total_input: float) -> Vector2:
+-	var left_abs: float = abs(left)
+-	var right_abs: float = abs(right)
+-	var minimum_value: float = max(min(left_abs, right_abs), 0.001)
+-	var maximum_value: float = max(left_abs, right_abs)
++	var requested_total: float = total_input
++	if abs(requested_total) <= 0.0001:
++		torque_bias_ratio = 1.0
++		return Vector2.ZERO
++	var drive_sign: float = sign(requested_total)
++	var left_in_direction: float = max(left * drive_sign, 0.0)
++	var right_in_direction: float = max(right * drive_sign, 0.0)
++	var directional_sum: float = left_in_direction + right_in_direction
++	if directional_sum <= 0.0001:
++		left_in_direction = abs(requested_total) * 0.5
++		right_in_direction = left_in_direction
++	else:
++		var normalization: float = abs(requested_total) / directional_sum
++		left_in_direction *= normalization
++		right_in_direction *= normalization
++	var minimum_value: float = max(min(left_in_direction, right_in_direction), 0.001)
++	var maximum_value: float = max(left_in_direction, right_in_direction)
+ 	torque_bias_ratio = maximum_value / minimum_value
+-	if torque_bias_ratio <= config.differential_max_bias_ratio:
+-		return Vector2(left, right)
+-	var total_abs: float = left_abs + right_abs
+-	var low_abs: float = total_abs / (1.0 + config.differential_max_bias_ratio)
+-	var high_abs: float = total_abs - low_abs
+-	var left_is_high: bool = left_abs >= right_abs
+-	var sign_value: float = sign(total_input if total_input != 0.0 else left + right)
+-	if left_is_high:
+-		return Vector2(high_abs * sign_value, low_abs * sign_value)
+-	return Vector2(low_abs * sign_value, high_abs * sign_value)
++	if torque_bias_ratio > config.differential_max_bias_ratio:
++		var low_value: float = abs(requested_total) / (1.0 + config.differential_max_bias_ratio)
++		var high_value: float = abs(requested_total) - low_value
++		if left_in_direction >= right_in_direction:
++			left_in_direction = high_value
++			right_in_direction = low_value
++		else:
++			left_in_direction = low_value
++			right_in_direction = high_value
++		torque_bias_ratio = config.differential_max_bias_ratio
++	return Vector2(left_in_direction * drive_sign, right_in_direction * drive_sign)
+ 
+ func _update_axle_compliance(left_torque: float, right_torque: float, left_omega: float, right_omega: float, delta: float) -> void:
+ 	var carrier_left_speed: float = carrier_angular_velocity
+--- dxn_car_sandbox_v5/scripts/vehicle/vehicle_config.gd
++++ dxn_car_sandbox_v5/scripts/vehicle/vehicle_config.gd
+@@ -188,7 +188,7 @@
+ var tyre_mu_lateral_dry: float = 1.17
+ var tyre_mu_slide_fraction: float = 0.78
+ var tyre_load_sensitivity: float = 0.115
+-var tyre_longitudinal_stiffness: float = 11.5
++var tyre_longitudinal_stiffness: float = 115000.0
+ var tyre_cornering_stiffness_front: float = 94000.0
+ var tyre_cornering_stiffness_rear: float = 103000.0
+ var tyre_camber_stiffness_front: float = 7800.0
+--- dxn_car_sandbox_v5/tests/physics_unit_tests.gd
++++ dxn_car_sandbox_v5/tests/physics_unit_tests.gd
+@@ -37,10 +37,10 @@
+ 	var steering: DXNSteeringSystem = DXNSteeringSystem.new()
+ 	steering.configure(config)
+ 	var angles: Vector2 = steering.calculate_ackermann(deg_to_rad(24.0))
+-	_check(angles.x > angles.y, "left turn inner wheel angle greater than outer")
++	_check(angles.y > angles.x, "positive steering makes right inner wheel angle greater")
+ 	_check(rad_to_deg(angles.x) < 42.0, "Ackermann inner angle bounded")
+ 	var reverse_angles: Vector2 = steering.calculate_ackermann(deg_to_rad(-24.0))
+-	_check(abs(reverse_angles.y) > abs(reverse_angles.x), "right turn inner wheel angle greater than outer")
++	_check(abs(reverse_angles.x) > abs(reverse_angles.y), "negative steering makes left inner wheel angle greater")
+ 
+ func _test_suspension(config: DXNVehicleConfig) -> void:
+ 	var suspension: DXNSuspensionSystem = DXNSuspensionSystem.new()
+@@ -129,9 +129,15 @@
+ 	var input_state: DXNVehicleInputState = DXNVehicleInputState.new()
+ 	input_state.throttle = 1.0
+ 	var accumulated: Vector2 = Vector2.ZERO
+-	for _index in range(600):
+-		accumulated = powertrain.step(input_state, rear_left, rear_right, 4.0, 1.0 / 600.0)
+-	_check(accumulated.x > 0.0 and accumulated.y > 0.0, "RWD produces rear axle drive torque")
++	var peak_drive_torque: float = 0.0
++	var wheel_inertia: float = config.rear_wheel_inertia
++	for _index in range(1200):
++		accumulated = powertrain.step(input_state, rear_left, rear_right, 0.0, 1.0 / 600.0)
++		peak_drive_torque = max(peak_drive_torque, accumulated.x, accumulated.y)
++		rear_left.angular_velocity += accumulated.x / max(wheel_inertia, 0.01) * (1.0 / 600.0)
++		rear_right.angular_velocity += accumulated.y / max(wheel_inertia, 0.01) * (1.0 / 600.0)
++	_check(peak_drive_torque > 50.0, "RWD produces rear axle drive torque")
++	_check(abs(accumulated.x - accumulated.y) < max(abs(accumulated.x + accumulated.y) * 0.05, 2.0), "straight-line RWD torque remains symmetric")
+ 	_check(powertrain.gearbox.current_gear >= 1, "automatic powertrain engages forward gear")
+ 
+ func _test_rigid_body_impulse(config: DXNVehicleConfig) -> void:
